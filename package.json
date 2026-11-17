@@ -1,0 +1,11 @@
+{
+  "name": "polski-powoli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Polski, powoli - curso de polonês (APK via Capacitor)",
+  "dependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/core": "^6.1.0"
+  }
+}

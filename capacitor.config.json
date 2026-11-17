@@ -1,0 +1,6 @@
+{
+  "appId": "br.polski.powoli",
+  "appName": "Polski, powoli",
+  "webDir": "www",
+  "android": { "allowMixedContent": false }
+}
