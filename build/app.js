@@ -1,0 +1,1082 @@
+(() => {
+'use strict';
+const STEPS = [
+  { id: 'vocab', label: 'Palavras' },
+  { id: 'gramatica', label: 'Gramática' },
+  { id: 'dialogo', label: 'Diálogo' },
+  { id: 'pratica', label: 'Prática' },
+  { id: 'redacao', label: 'Redação' },
+];
+const LETTERS = ['ą', 'ć', 'ę', 'ł', 'ń', 'ó', 'ś', 'ź', 'ż'];
+const app = document.getElementById('app');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const pad = n => String(n).padStart(2, '0');
+const today = () => { const d = new Date(); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+const toast = msg => { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); };
+const SPK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
+/* Texto falável: tira observações entre parênteses, reticências e a segunda forma "a / b" quando é par masculino/feminino */
+const speakable = s => String(s).replace(/\(.*?\)/g, '').replace(/…/g, '').replace(/\s+/g, ' ').trim();
+const sayBtn = (text, label, mini) => `<button class="say${mini ? ' mini' : ''}" type="button" data-say="${esc(speakable(text))}" aria-label="Ouvir ${esc(label || text)}">${SPK}</button>`;
+
+/* ---------- Progresso: db por pessoa, com cópia local ---------- */
+const blank = () => ({ p: {}, last: null, known: {}, days: {}, stops: {}, grades: [] });
+const store = {
+  db: null, uid: null, data: blank(), essays: {},
+  key: 'polski-progress-v1',
+  async init() {
+    try { const raw = localStorage.getItem(this.key); if (raw) this.data = Object.assign(blank(), JSON.parse(raw)); } catch (e) {}
+    try { const ess = localStorage.getItem(this.key + '-essays'); if (ess) this.essays = JSON.parse(ess); } catch (e) {}
+    if (!window.claude?.use) return;
+    try {
+      const [db, user] = await Promise.all([claude.use('db'), claude.use('user')]);
+      if (!db || !user) return;
+      const uid = await user.id();
+      if (!uid) return;
+      this.db = db; this.uid = uid;
+      const snap = await this.ref().get();
+      if (snap.exists) this.data = mergeProgress(this.data, snap.data());
+      setSync('Progresso salvo na sua conta.');
+      render();
+    } catch (e) { setSync('Progresso salvo só neste navegador.'); }
+  },
+  ref() { return this.db.doc('data/users/' + this.uid + '/progress'); },
+  essayRef(id) { return this.ref().collection('essays').doc(id); },
+  saving: Promise.resolve(), timer: null,
+  save(now) {
+    try { localStorage.setItem(this.key, JSON.stringify(this.data)); } catch (e) {}
+    if (!this.db) return;
+    clearTimeout(this.timer);
+    const run = () => { const body = JSON.parse(JSON.stringify(this.data)); this.saving = this.saving.then(() => this.ref().set(body)).catch(() => setSync('Não consegui salvar na conta agora; ficou salvo neste navegador.')); };
+    if (now) run(); else this.timer = setTimeout(run, 1200);
+  },
+  get(id) { return this.data.p[id] || (this.data.p[id] = {}); },
+  log(n = 1) { const d = today(); this.data.days[d] = (this.data.days[d] || 0) + n; },
+  mark(id, step, val = true) { this.get(id)[step] = val; this.data.last = id; this.log(); this.save(); },
+  box(key) { return this.data.known[key] || 0; },
+  setBox(key, v) { if (v <= 0) delete this.data.known[key]; else this.data.known[key] = Math.min(5, v); this.log(); this.save(); },
+  async loadEssay(id) {
+    if (this.essays[id]) return this.essays[id];
+    let e = { attempts: [], draft: '' };
+    if (this.db) { try { const s = await this.essayRef(id).get(); if (s.exists) e = Object.assign(e, s.data()); } catch (err) {} }
+    this.essays[id] = e; return e;
+  },
+  essayTimers: {}, essayQueue: {},
+  saveEssay(id, now) {
+    try { localStorage.setItem(this.key + '-essays', JSON.stringify(this.essays)); } catch (e) {}
+    if (!this.db) return;
+    clearTimeout(this.essayTimers[id]);
+    const run = () => { const body = JSON.parse(JSON.stringify(this.essays[id])); this.essayQueue[id] = (this.essayQueue[id] || Promise.resolve()).then(() => this.essayRef(id).set(body)).catch(() => {}); };
+    if (now) run(); else this.essayTimers[id] = setTimeout(run, 1500);
+  },
+};
+function mergeProgress(a, b) {
+  a = Object.assign(blank(), a); b = Object.assign(blank(), b);
+  const out = blank(); out.last = b.last || a.last;
+  for (const id of new Set([...Object.keys(a.p), ...Object.keys(b.p)])) {
+    const x = a.p[id] || {}, y = b.p[id] || {}, m = Object.assign({}, x, y);
+    for (const k of ['pratica', 'redacao']) {
+      if (x[k] === undefined || y[k] === undefined) continue;
+      const vx = typeof x[k] === 'number' ? x[k] : (x[k] ? 10 : 0), vy = typeof y[k] === 'number' ? y[k] : (y[k] ? 10 : 0);
+      m[k] = vx >= vy ? x[k] : y[k];
+    }
+    if (x.prat || y.prat) { m.prat = {}; for (const k of ['mc', 'fill', 'order']) { const v = Math.max((x.prat || {})[k] ?? -1, (y.prat || {})[k] ?? -1); if (v >= 0) m.prat[k] = v; } }
+    out.p[id] = m;
+  }
+  for (const k of new Set([...Object.keys(a.known), ...Object.keys(b.known)])) out.known[k] = Math.max(a.known[k] || 0, b.known[k] || 0);
+  for (const k of new Set([...Object.keys(a.days), ...Object.keys(b.days)])) out.days[k] = Math.max(a.days[k] || 0, b.days[k] || 0);
+  out.stops = Object.assign({}, a.stops, b.stops);
+  const seen = new Set(); out.grades = [...a.grades, ...b.grades].filter(g => { const k = g.id + g.at; if (seen.has(k)) return false; seen.add(k); return true; }).sort((p, q) => p.at < q.at ? -1 : 1);
+  return out;
+}
+function setSync(t) { document.getElementById('syncnote').textContent = t; }
+
+/* ---------- Áudio: voz do Claude, ou voz polonesa do aparelho ---------- */
+const audio = {
+  tts: null, voice: null, rate: 0.9,
+  async init() {
+    try { this.rate = +(localStorage.getItem('polski-rate') || 0.9); } catch (e) {}
+    try {
+      if (window.speechSynthesis) {
+        const pick = () => { const vs = speechSynthesis.getVoices(); this.voice = vs.find(v => /^pl(-|_|$)/i.test(v.lang) && /google|natural|online/i.test(v.name)) || vs.find(v => /^pl/i.test(v.lang)) || null; this.update(); };
+        pick(); speechSynthesis.onvoiceschanged = pick; setTimeout(pick, 1200);
+      }
+    } catch (e) {}
+    try { if (window.claude?.use) { this.tts = await claude.use('tts'); this.update(); } } catch (e) {}
+    this.update();
+  },
+  can() { return !!(this.tts || this.voice); },
+  mode() { return this.tts ? 'claude' : this.voice ? 'device' : 'none'; },
+  update() {
+    document.body.classList.toggle('no-audio', !this.can());
+    const c = document.getElementById('audiochip'); if (!c) return;
+    const m = this.mode();
+    c.className = 'audiochip ' + (m === 'none' ? 'off' : 'on');
+    c.innerHTML = `<i></i>${m === 'claude' ? 'Voz do Claude' : m === 'device' ? 'Voz do aparelho' : 'Ativar áudio'}`;
+  },
+  async say(text, onEnd) {
+    text = speakable(text); if (!text) { onEnd && onEnd(); return; }
+    store.log(1);
+    if (this.tts) {
+      try { await this.tts.speak(text, { language: 'pl', rate: this.rate }); onEnd && onEnd(); return; }
+      catch (e) {
+        if (e && (e.code === 'not_granted')) { this.tts = null; this.update(); }
+        if (e && e.code === 'viewer_stopped') { return; }
+        if (!this.voice) { onEnd && onEnd(); if (e && e.code === 'rate_limited') toast('Muitos áudios seguidos. Espere um pouco.'); return; }
+      }
+    }
+    if (this.voice) {
+      try {
+        speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text); u.voice = this.voice; u.lang = this.voice.lang; u.rate = this.rate;
+        u.onend = () => onEnd && onEnd(); u.onerror = () => onEnd && onEnd(); speechSynthesis.speak(u);
+      } catch (e) { onEnd && onEnd(); }
+    } else { toast('Sem voz polonesa nesta tela. Veja "Como ativar o áudio".'); onEnd && onEnd(); }
+  },
+  stop() { try { this.tts && this.tts.stop(); } catch (e) {} try { window.speechSynthesis && speechSynthesis.cancel(); } catch (e) {} },
+};
+function audioHelpHTML() {
+  return `<div class="audiohelp" id="audiohelp"><h4>Como ativar o áudio</h4>
+  <p>${audio.mode() === 'claude' ? 'Você está ouvindo a voz do Claude, que só funciona no navegador.' : audio.mode() === 'device' ? 'Você está ouvindo a voz polonesa do seu aparelho.' : 'Esta tela não tem nenhuma voz polonesa disponível.'} O app tenta, nesta ordem: a voz do Claude (navegador no computador), e depois a voz polonesa do aparelho.</p>
+  <ol>
+    <li><b>No app do Claude no celular</b> a voz do Claude não está disponível. Abra o curso no navegador do celular (Chrome ou Safari) pelo link do artefato.</li>
+    <li><b>Android:</b> Configurações → Sistema → Idiomas → Saída de texto para fala → Mecanismo do Google → Instalar dados de voz → <i>Polski</i>.</li>
+    <li><b>iPhone:</b> Ajustes → Acessibilidade → Conteúdo Falado → Vozes → Polonês → baixe uma voz (por exemplo, Zosia).</li>
+    <li>Depois de instalar, feche e abra a página de novo.</li>
+  </ol>
+  <p>Velocidade: <span class="rate">${[0.7, 0.85, 1].map(r => `<button type="button" data-act="rate" data-r="${r}" aria-pressed="${Math.abs(audio.rate - r) < .06}">${r === 0.7 ? 'Bem devagar' : r === 0.85 ? 'Devagar' : 'Normal'}</button>`).join('')}</span>
+  <button class="btn ghost sm" type="button" data-say="Dzień dobry! Jak się masz?">Testar: „Dzień dobry! Jak się masz?”</button></p></div>`;
+}
+
+/* ---------- IA ---------- */
+let samplePromise = null;
+const getSample = () => (samplePromise = samplePromise || (window.claude?.use ? claude.use('sample').catch(() => null) : Promise.resolve(null)));
+
+/* ---------- Dados ---------- */
+const level = id => COURSE.levels[id] || [];
+const chId = (lvl, n) => lvl + '-' + n;
+const findCh = (lvl, n) => level(lvl).find(c => c.n === n);
+const allWords = ch => ch.vocab.flatMap(g => g.w.map(w => ({ pl: w[0], pt: w[1], note: w[2] || '' })));
+const bankGroups = lvl => COURSE.banks[lvl] || [];
+const bankWords = lvl => bankGroups(lvl).flatMap(g => g.w.map(w => ({ pl: w[0], pt: w[1], g: w[2] || '', note: w[3] || '' })));
+const wkey = (lvl, pl) => lvl + '|' + pl.toLowerCase();
+const levelVocab = lvl => { const m = new Map(); for (const c of level(lvl)) for (const w of allWords(c)) m.set(wkey(lvl, w.pl), w); for (const w of bankWords(lvl)) m.set(wkey(lvl, w.pl), w); return m; };
+const mastered = key => store.box(key) >= 2;
+const stepDone = (p, s) => s === 'pratica' ? (p.pratica || 0) >= 70 : s === 'redacao' ? (p.redacao === true || (typeof p.redacao === 'number' && p.redacao >= 5)) : !!p[s];
+const chDone = id => STEPS.every(s => stepDone(store.get(id), s.id));
+const countDone = id => STEPS.filter(s => stepDone(store.get(id), s.id)).length;
+const stopsOf = lvl => COURSE.stopsBy[lvl] || [];
+const stopAfter = (lvl, n) => stopsOf(lvl).find(s => s.after === n);
+
+/* ---------- Rotas ---------- */
+let view = { name: 'home', lvl: 'a1' };
+let ui = { lvl: 'a1', hideTr: false, hidePt: false, flash: null, vmode: 'learn', learn: null, gc: null, dmode: 'read', rp: null, ps: null, bankQ: '', bankF: 'all', open: {}, showHelp: false, resetAsk: false, bex: {} };
+function parseHash() {
+  const h = location.hash.replace('#', '');
+  let m = h.match(/^(a1|a2|b1|b2)-(\d+)(?:-(vocab|gramatica|dialogo|pratica|redacao))?$/);
+  if (m && findCh(m[1], +m[2])) return { name: 'ch', lvl: m[1], n: +m[2], tab: m[3] || 'vocab' };
+  m = h.match(/^(a1|a2|b1|b2)-parada-(\d+)$/);
+  if (m && stopAfter(m[1], +m[2])) return { name: 'stop', lvl: m[1], n: +m[2] };
+  m = h.match(/^vocabulario(?:-(a1|a2|b1|b2))?$/);
+  if (m) return { name: 'bank', lvl: m[1] || ui.lvl };
+  if (h === 'progresso') return { name: 'stats', lvl: ui.lvl };
+  m = h.match(/^nivel-(a1|a2|b1|b2)$/);
+  if (m) return { name: 'home', lvl: m[1] };
+  return { name: 'home', lvl: ui.lvl };
+}
+function go(hash) { if (location.hash === '#' + hash) route(); else location.hash = hash; }
+function route() {
+  const prev = view; view = parseHash();
+  ui.lvl = view.lvl;
+  if (view.name === 'ch' && (prev.name !== 'ch' || prev.n !== view.n || prev.lvl !== view.lvl)) { ui.flash = null; ui.learn = null; ui.gc = null; ui.rp = null; ui.ps = null; ui.result = null; }
+  if (view.name === 'ch' && prev.name === 'ch' && prev.tab !== view.tab) { ui.flash = null; }
+  if (view.name !== prev.name) ui.flash = null;
+  audio.stop();
+  render();
+  if (prev.name !== view.name || prev.n !== view.n || prev.lvl !== view.lvl) window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', route);
+
+/* ---------- Render ---------- */
+function render() {
+  renderNav();
+  if (view.name === 'ch') renderChapter();
+  else if (view.name === 'stop') renderStop();
+  else if (view.name === 'bank') renderBank();
+  else if (view.name === 'stats') renderStats();
+  else renderHome();
+  audio.update();
+}
+function renderNav() {
+  const lvlNav = view.name === 'stats' ? '' : COURSE.meta.map(m => {
+    const has = level(m.id).length || bankGroups(m.id).length;
+    const target = view.name === 'bank' ? 'vocabulario-' + m.id : 'nivel-' + m.id;
+    return `<button type="button" data-act="level" data-go="${target}" aria-pressed="${ui.lvl === m.id}" ${has ? '' : 'disabled'}>${m.name}${level(m.id).length || view.name === 'bank' ? '' : '<small>vocab.</small>'}</button>`;
+  }).join('');
+  document.getElementById('levels').innerHTML = lvlNav;
+  document.getElementById('levels').style.display = lvlNav ? '' : 'none';
+  const cur = view.name === 'bank' ? 'bank' : view.name === 'stats' ? 'stats' : 'course';
+  document.getElementById('mainnav').innerHTML = `
+    <a href="#nivel-${ui.lvl}" ${cur === 'course' ? 'aria-current="page"' : ''}>Curso</a>
+    <a href="#vocabulario-${ui.lvl}" ${cur === 'bank' ? 'aria-current="page"' : ''}>Vocabulário</a>
+    <a href="#progresso" ${cur === 'stats' ? 'aria-current="page"' : ''}>Progresso</a>
+    <span class="spacer"></span>
+    <button class="audiochip" id="audiochip" type="button" data-act="audiohelp"></button>`;
+}
+function helpSlot() { return ui.showHelp ? audioHelpHTML() : ''; }
+
+function nextChapter(lvl) {
+  const chs = level(lvl);
+  const last = store.data.last && store.data.last.startsWith(lvl + '-') ? +store.data.last.split('-')[1] : null;
+  if (last && findCh(lvl, last) && !chDone(chId(lvl, last))) return findCh(lvl, last);
+  return chs.find(c => !chDone(chId(lvl, c.n))) || chs[chs.length - 1];
+}
+function renderHome() {
+  const meta = COURSE.meta.find(m => m.id === ui.lvl);
+  const chs = level(ui.lvl);
+  if (!chs.length) {
+    const n = levelVocab(ui.lvl).size;
+    app.innerHTML = `${helpSlot()}<section class="hero"><div><div class="eyebrow">Nível ${esc(meta.name)} · ${esc(meta.title)}</div><h1>Capítulos <em>em breve</em></h1>
+      <p>Os capítulos do ${esc(meta.name)} chegam quando você mandar os temas do Busuu. O banco de vocabulário do nível já está pronto: ${n} palavras e expressões com áudio e cartões.</p>
+      <a class="btn accent" href="#vocabulario-${ui.lvl}">Abrir vocabulário ${esc(meta.name)} →</a></div></section>`;
+    return;
+  }
+  const done = chs.filter(c => chDone(chId(ui.lvl, c.n))).length;
+  const steps = chs.reduce((s, c) => s + countDone(chId(ui.lvl, c.n)), 0);
+  const pct = Math.round(steps / (chs.length * STEPS.length) * 100);
+  const nx = nextChapter(ui.lvl);
+  const started = steps > 0;
+  app.innerHTML = `${helpSlot()}
+  <section class="hero">
+    <div>
+      <div class="eyebrow">Nível ${esc(meta.name)} · ${esc(meta.title)} · ${chs.length} capítulos</div>
+      <h1>${started ? 'Continue de onde <em>parou</em>' : 'Polonês sem <em>pressa</em>'}</h1>
+      <p>${started ? `Próximo: capítulo ${nx.n}, <b>${esc(nx.pl)}</b> (${esc(nx.pt)}).` : 'Os temas do Busuu, com vocabulário completo, gramática explicada, diálogos com áudio, exercícios, uma redação corrigida pela IA no fim de cada capítulo e uma parada por uma cidade polonesa entre eles.'}</p>
+      <a class="btn accent" href="#${ui.lvl}-${nx.n}">${started ? 'Continuar' : 'Começar pelo capítulo 1'} →</a>
+    </div>
+    <div class="bigglyph" aria-hidden="true">${esc(nx.gl[0])}<small><b>${esc(nx.gl[1])}</b></small></div>
+    <div class="meter"><div class="bar"><i style="width:${pct}%"></i></div><span class="num">${done}/${chs.length} capítulos · ${pct}%</span></div>
+  </section>
+  <div class="section-h"><h2>Capítulos e paradas</h2><span class="eyebrow">5 etapas cada</span></div>
+  <ol class="chapters">
+    ${chs.map(c => {
+      const id = chId(ui.lvl, c.n), p = store.get(id), st = stopAfter(ui.lvl, c.n);
+      return `<li class="${chDone(id) ? 'done' : ''}"><a href="#${ui.lvl}-${c.n}">
+        <span class="gl" aria-hidden="true">${esc(c.gl[0])}</span>
+        <span><span class="chnum">Capítulo ${pad(c.n)}</span><br><span class="ttl">${esc(c.pl)}</span><br><span class="sub">${esc(c.pt)}</span></span>
+        <span class="ticks" aria-label="${countDone(id)} de 5 etapas">${STEPS.map(s => `<i class="${stepDone(p, s.id) ? 'on' : ''}" title="${s.label}"></i>`).join('')}</span>
+      </a></li>${st ? `<li class="stoprow"><a href="#${ui.lvl}-parada-${c.n}"><span class="gl">Parada</span><span><span class="ttl">${esc(st.place)}</span><br><span class="sub">${esc(st.title)}</span></span><span class="sub">${store.data.stops[ui.lvl + '-' + c.n] ? '✓ lida' : ''}</span></a></li>` : ''}`;
+    }).join('')}
+  </ol>`;
+}
+
+function stopHTML(lvl, st, full) {
+  const read = store.data.stops[lvl + '-' + st.after];
+  return `<section class="stopcard" aria-label="Parada: ${esc(st.place)}">
+    <header><div class="eyebrow">Parada entre capítulos · depois do ${st.after}</div><h3>${esc(st.place)}</h3><div class="reg">${esc(st.region)} · ${esc(st.title)}</div></header>
+    <div class="body">
+      <ul class="facts">${st.facts.map(f => `<li>${esc(f)}</li>`).join('')}</ul>
+      <div class="eyebrow" style="margin-top:12px">Palavras da parada · toque para ouvir</div>
+      <div class="stopwords">${st.words.map(w => `<button type="button" data-say="${esc(speakable(w[0]))}"><b>${esc(w[0])}</b><span>${esc(w[1])}</span></button>`).join('')}</div>
+      ${st.src && st.src.length ? `<div class="srcs">Fontes: ${st.src.map(s => `<a href="${esc(s[1])}" target="_blank" rel="noopener">${esc(s[0])}</a>`).join(' · ')}</div>` : ''}
+      <div class="bar-actions" style="margin:14px 0 0">${read ? '<span class="okmark">✓ Parada lida</span>' : `<button class="btn sm" type="button" data-act="stopread" data-k="${lvl}-${st.after}">Marcar como lida</button>`}
+      ${full && findCh(lvl, st.after + 1) ? `<a class="btn ghost sm" href="#${lvl}-${st.after + 1}">Seguir para o capítulo ${st.after + 1} →</a>` : ''}</div>
+    </div></section>`;
+}
+function renderStop() {
+  const st = stopAfter(view.lvl, view.n);
+  app.innerHTML = `${helpSlot()}<a class="back" href="#nivel-${view.lvl}">← Todos os capítulos</a>${stopHTML(view.lvl, st, true)}`;
+}
+
+function renderChapter() {
+  const ch = findCh(view.lvl, view.n), id = chId(view.lvl, view.n), p = store.get(id);
+  const tab = view.tab;
+  if (store.data.last !== id) { store.data.last = id; store.save(); }
+  const chs = level(view.lvl), idx = chs.indexOf(ch), st = stopAfter(view.lvl, ch.n);
+  app.innerHTML = `${helpSlot()}
+  <a class="back" href="#nivel-${view.lvl}">← Todos os capítulos</a>
+  <section class="chhead">
+    <div class="bigglyph" aria-hidden="true">${esc(ch.gl[0])}</div>
+    <div><div class="eyebrow">${view.lvl.toUpperCase()} · Capítulo ${pad(ch.n)}</div><h1>${esc(ch.pl)}</h1><div class="pt">${esc(ch.pt)}</div></div>
+    <div class="sound"><b>${esc(ch.gl[0])}</b><span><i>${esc(ch.gl[1])}</i>: ${esc(ch.gl[2])}</span>${sayBtn(ch.gl[1])}</div>
+  </section>
+  <ul class="goals">${ch.goals.map(g => `<li>${esc(g)}</li>`).join('')}</ul>
+  <details class="busuu"><summary>Lições correspondentes no Busuu</summary><ol>${ch.busuu.map(b => `<li>${esc(b)}</li>`).join('')}</ol></details>
+  <nav class="tabs" role="tablist">${STEPS.map((s, i) => `<button type="button" role="tab" data-act="tab" data-tab="${s.id}" aria-selected="${tab === s.id}" class="${stepDone(p, s.id) ? 'ok' : ''}"><span class="n">${stepDone(p, s.id) ? '✓' : i + 1}</span>${s.label}</button>`).join('')}</nav>
+  <section class="panel" id="panel"></section>
+  ${st && (tab === 'redacao' || chDone(id)) ? stopHTML(view.lvl, st, false) : ''}
+  <div class="stepdone" style="border:0">
+    ${idx > 0 ? `<a class="btn ghost sm" href="#${view.lvl}-${chs[idx - 1].n}">← Cap. ${chs[idx - 1].n}</a>` : '<span></span>'}
+    ${idx < chs.length - 1 ? `<a class="btn ghost sm" href="#${view.lvl}-${chs[idx + 1].n}">Cap. ${chs[idx + 1].n} →</a>` : ''}
+  </div>`;
+  renderPanel(ch, id);
+  const sel = document.querySelector('.tabs [aria-selected="true"]');
+  if (sel) { const nav = sel.parentElement; nav.scrollLeft = sel.offsetLeft - (nav.clientWidth - sel.offsetWidth) / 2; }
+}
+function stepFooter(id, step, text) {
+  const p = store.get(id);
+  const i = STEPS.findIndex(s => s.id === step), nx = STEPS[i + 1];
+  return `<div class="stepdone"><p>${stepDone(p, step) ? '<span class="okmark">✓ Etapa concluída.</span>' : text}</p>
+  <span style="display:flex;gap:8px;flex-wrap:wrap">${!stepDone(p, step) ? `<button class="btn sm" type="button" data-act="mark" data-step="${step}">Marcar como estudado</button>` : ''}
+  ${nx ? `<button class="btn ghost sm" type="button" data-act="tab" data-tab="${nx.id}">Próxima: ${nx.label} →</button>` : ''}</span></div>`;
+}
+function renderPanel(ch, id) {
+  const el = document.getElementById('panel');
+  const t = view.tab;
+  if (t === 'vocab') el.innerHTML = ui.flash ? flashHTML() : vocabHTML(ch, id);
+  else if (t === 'gramatica') el.innerHTML = grammarHTML(ch, id);
+  else if (t === 'dialogo') el.innerHTML = dialogueHTML(ch, id);
+  else if (t === 'pratica') el.innerHTML = practiceHTML(ch, id);
+  else if (t === 'redacao') { el.innerHTML = '<p class="lead"><span class="spinner"></span> Carregando sua redação…</p>'; writingRender(ch, id); }
+}
+
+/* ---------- Exemplos ---------- */
+const exOf = (lvl, n, key) => ((COURSE.extras[lvl + '-' + n] || {}).ex || {})[key] || null;
+const checksOf = (lvl, n) => (COURSE.extras[lvl + '-' + n] || {}).checks || [];
+const markHTML = s => esc(s).replace(/\*([^*]+)\*/g, '<mark>$1</mark>');
+const plainEx = s => String(s).replace(/\*/g, '');
+const clozeOf = s => { const m = String(s).match(/^(.*?)\*([^*]+)\*(.*)$/); return m ? { a: m[1].replace(/\*/g, ''), ans: m[2], b: m[3].replace(/\*/g, '') } : null; };
+const firstForm = pl => speakable(pl.split(' / ')[0]).replace(/[?!.]$/, '');
+const chWords = (lvl, ch) => allWords(ch).map(w => Object.assign({}, w, { ex: exOf(lvl, ch.n, w.pl) }));
+const batchesOf = (lvl, ch) => { const ws = chWords(lvl, ch), out = []; for (let i = 0; i < ws.length; i += 5) out.push(ws.slice(i, i + 5)); if (out.length > 1 && out[out.length - 1].length < 3) { const last = out.pop(); out[out.length - 1].push(...last); } return out; };
+const norm = s => s.toLowerCase().replace(/[.,!?„”"«»:;—–-]/g, ' ').replace(/\s+/g, ' ').trim();
+const strip = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ł/g, 'l').replace(/Ł/g, 'L');
+function judge(v, answers) {
+  const n = norm(v || ''); if (!n) return 'wrong';
+  for (const a of answers) if (n === norm(a)) return 'right';
+  for (const a of answers) if (strip(n) === strip(norm(a))) return 'close';
+  return 'wrong';
+}
+const keysHTML = () => `<div class="keys" aria-label="Letras polonesas">${LETTERS.map(l => `<button type="button" data-act="key" data-k="${l}">${l}</button>`).join('')}</div>`;
+
+/* ---------- 1. Palavras: aprender em blocos ---------- */
+function exampleBlock(ex) {
+  if (!ex) return '';
+  return `<div class="example"><div class="exl" lang="pl">${markHTML(ex[0])} ${sayBtn(plainEx(ex[0]), 'o exemplo', true)}</div><div class="ext">${esc(ex[1])}</div></div>`;
+}
+function vocabHTML(ch, id) {
+  const p = store.get(id), batches = batchesOf(view.lvl, ch), total = allWords(ch).length;
+  const vb = Math.min(p.vb || 0, batches.length);
+  const modes = `<div class="subtabs" role="tablist">
+    <button type="button" role="tab" data-act="vmode" data-m="learn" aria-selected="${ui.vmode === 'learn'}">Aprender</button>
+    <button type="button" role="tab" data-act="vmode" data-m="list" aria-selected="${ui.vmode === 'list'}">Lista com exemplos</button>
+    <button type="button" role="tab" data-act="flash" aria-selected="false">Cartões</button></div>`;
+  if (ui.vmode === 'list') {
+    return `${modes}<div class="bar-actions"><label class="toggle"><input type="checkbox" data-act="hidetr" ${ui.hideTr ? 'checked' : ''}> Esconder tradução</label></div>
+    <div class="${ui.hideTr ? 'hide-tr' : ''}">${ch.vocab.map(g => `<div class="vgroup"><h4>${esc(g.g)}</h4>${g.w.map(w => { const ex = exOf(view.lvl, ch.n, w[0]); return `
+      <div class="vrow" tabindex="0"><span class="pl">${esc(w[0])}</span><span class="tr">${esc(w[1])}</span>${sayBtn(firstForm(w[0]))}
+      ${w[2] ? `<span class="note">${esc(w[2])}</span>` : ''}${ex ? `<span class="vex"><span lang="pl">${markHTML(ex[0])}</span> ${sayBtn(plainEx(ex[0]), 'o exemplo', true)}<br><span class="tr">${esc(ex[1])}</span></span>` : ''}</div>`; }).join('')}</div>`).join('')}</div>
+    ${stepFooter(id, 'vocab', 'A etapa conclui sozinha quando você terminar todos os blocos em "Aprender".')}`;
+  }
+  const L = ui.learn;
+  if (!L) {
+    return `${modes}
+    <div class="learnintro">
+      <h3>${total} palavras em ${batches.length} blocos</h3>
+      <p class="lead">Cada bloco tem 5 palavras. Você vê cada uma com áudio e uma frase de exemplo, depois liga os pares e completa os exemplos. Assim a palavra já entra em uso.</p>
+      <div class="blocks">${batches.map((b, i) => `<button type="button" class="blockchip ${i < vb ? 'done' : ''} ${i === Math.min(vb, batches.length - 1) && vb < batches.length ? 'next' : ''}" data-act="lstart" data-b="${i}"><b>${i + 1}</b><span>${b.map(w => esc(firstForm(w.pl))).slice(0, 3).join(', ')}…</span></button>`).join('')}</div>
+      <div class="bar-actions">${vb < batches.length ? `<button class="btn accent" type="button" data-act="lstart" data-b="${vb}">${vb ? 'Continuar no bloco ' + (vb + 1) : 'Começar o bloco 1'} →</button>` : `<span class="okmark">✓ Você passou por todos os blocos.</span><button class="btn ghost sm" type="button" data-act="lstart" data-b="0">Revisar do início</button>`}</div>
+    </div>
+    ${stepFooter(id, 'vocab', 'A etapa conclui sozinha quando você terminar todos os blocos.')}`;
+  }
+  const batch = batches[L.b];
+  const head = `<div class="learnhead"><button class="btn ghost sm" type="button" data-act="lexit">← Blocos</button><span class="wc num">Bloco ${L.b + 1} de ${batches.length}</span>
+    <span class="phases">${['Conhecer', 'Ligar', 'Usar'].map((t, i) => `<i class="${['cards', 'match', 'cloze', 'done'].indexOf(L.phase) > i ? 'ok' : ['cards', 'match', 'cloze'][i] === L.phase ? 'on' : ''}">${t}</i>`).join('')}</span></div>`;
+  if (L.phase === 'cards') {
+    const w = batch[L.i];
+    return `${head}<div class="wcard">
+      <div class="meta">Palavra ${L.i + 1} de ${batch.length}</div>
+      <div class="face" lang="pl">${esc(w.pl)}</div>
+      <div class="bar-actions" style="justify-content:center">${sayBtn(firstForm(w.pl), 'a palavra')}<span class="wc">ouça e repita em voz alta</span></div>
+      <div class="back-face">${esc(w.pt)}</div>${w.note ? `<div class="meta">${esc(w.note)}</div>` : ''}
+      ${exampleBlock(w.ex)}
+      <div class="bar-actions" style="justify-content:space-between;margin-top:14px">
+        <button class="btn ghost sm" type="button" data-act="lprev" ${L.i === 0 ? 'disabled' : ''}>← Anterior</button>
+        <button class="btn sm" type="button" data-act="lnext">${L.i === batch.length - 1 ? 'Praticar estas palavras →' : 'Próxima →'}</button>
+      </div></div>`;
+  }
+  if (L.phase === 'match') return head + `<p class="lead">Ligue cada palavra à tradução: toque numa palavra em polonês e depois no significado.</p>` + matchHTML(L.m, 'lmatch');
+  if (L.phase === 'cloze') {
+    const q = L.cz[L.ci];
+    return `${head}<p class="lead">Complete cada exemplo com a palavra certa. Frase ${L.ci + 1} de ${L.cz.length}.</p>
+      <div class="q"><div class="clz" lang="pl">${esc(q.a)}<span class="blank">${q.pick ? esc(q.pick) : '____'}</span>${esc(q.b)}</div><div class="hint">${esc(q.pt)}</div>
+      <div class="opts">${q.opts.map((o, j) => `<button type="button" data-act="lcz" data-o="${j}" ${q.pick ? 'disabled' : ''} class="${q.pick && o === q.ans ? 'right' : ''} ${q.pick === o && o !== q.ans ? 'wrong' : ''}">${esc(o)}</button>`).join('')}</div>
+      ${q.pick ? `<div class="fb ${q.pick === q.ans ? 'right' : 'wrong'}">${q.pick === q.ans ? 'Certo!' : 'A resposta é <b>' + esc(q.ans) + '</b>.'} ${sayBtn(q.a + q.ans + q.b, 'a frase', true)}</div>
+      <div class="bar-actions" style="margin-top:10px"><button class="btn sm" type="button" data-act="lczn">${L.ci === L.cz.length - 1 ? 'Concluir bloco' : 'Próxima frase'} →</button></div>` : ''}</div>`;
+  }
+  const right = L.cz.filter(q => q.pick === q.ans).length;
+  return `${head}<div class="wcard"><div class="face">Bloco ${L.b + 1} concluído</div>
+    <p class="meta">Você acertou ${right} de ${L.cz.length} exemplos${L.m.miss ? ` e errou ${L.m.miss} ligação(ões)` : ' e ligou todos os pares sem erro'}.</p>
+    <div class="bar-actions" style="justify-content:center">${L.b < batches.length - 1 ? `<button class="btn accent" type="button" data-act="lstart" data-b="${L.b + 1}">Próximo bloco →</button>` : `<button class="btn accent" type="button" data-act="tab" data-tab="gramatica">Ir para a gramática →</button>`}
+    <button class="btn ghost sm" type="button" data-act="lstart" data-b="${L.b}">Refazer este bloco</button></div></div>`;
+}
+function makeMatch(words) {
+  return { left: shuffle(words.map((w, i) => ({ i, t: firstForm(w.pl), full: w.pl }))), right: shuffle(words.map((w, i) => ({ i, t: w.pt }))), sel: null, doneL: [], doneR: [], miss: 0, bad: null };
+}
+function matchHTML(m, act) {
+  return `<div class="match">
+    <div class="mcol">${m.left.map(x => `<button type="button" data-act="${act}" data-side="l" data-i="${x.i}" class="${m.doneL.includes(x.i) ? 'ok' : ''} ${m.sel === x.i ? 'sel' : ''} ${m.bad && m.bad.l === x.i ? 'bad' : ''}" ${m.doneL.includes(x.i) ? 'disabled' : ''} lang="pl">${esc(x.t)}</button>`).join('')}</div>
+    <div class="mcol">${m.right.map(x => `<button type="button" data-act="${act}" data-side="r" data-i="${x.i}" class="${m.doneR.includes(x.i) ? 'ok' : ''} ${m.bad && m.bad.r === x.i ? 'bad' : ''}" ${m.doneR.includes(x.i) ? 'disabled' : ''}>${esc(x.t)}</button>`).join('')}</div>
+  </div>`;
+}
+/* Retorna true quando todos os pares foram ligados */
+function matchTap(m, side, i, words) {
+  m.bad = null;
+  if (side === 'l') { m.sel = i; const w = words[i]; audio.can() && audio.say(firstForm(w.pl)); return false; }
+  if (m.sel === null) { toast('Toque primeiro numa palavra em polonês.'); return false; }
+  const parts = t => t.toLowerCase().split(/\s*[\/,;]\s*/).map(x => x.trim()).filter(Boolean);
+  const pa = parts(words[m.sel].pt), pb = parts(words[i].pt);
+  if (m.sel === i || pa.some(x => pb.includes(x))) { m.doneL.push(m.sel); m.doneR.push(i); m.sel = null; }
+  else { m.bad = { l: m.sel, r: i }; m.miss++; m.sel = null; }
+  return m.doneL.length === words.length;
+}
+function makeCloze(words, pool) {
+  const forms = [...new Set(pool.map(w => w.ex && clozeOf(w.ex[0])).filter(Boolean).map(c => c.ans))];
+  return words.filter(w => w.ex && clozeOf(w.ex[0])).map(w => {
+    const c = clozeOf(w.ex[0]);
+    const others = shuffle(forms.filter(f => f.toLowerCase() !== c.ans.toLowerCase())).slice(0, 3);
+    return { a: c.a, b: c.b, ans: c.ans, pt: w.ex[1], w, opts: shuffle([c.ans, ...others]), pick: null };
+  });
+}
+function finishBatch(ch, id) {
+  const L = ui.learn, p = store.get(id), batches = batchesOf(view.lvl, ch);
+  for (const q of L.cz) if (q.pick === q.ans) { const k = wkey(view.lvl, q.w.pl); store.setBox(k, store.box(k) + 1); }
+  p.vb = Math.max(p.vb || 0, L.b + 1);
+  if (p.vb >= batches.length && !p.vocab) { p.vocab = true; toast('Etapa Palavras concluída'); }
+  store.data.last = id; store.log(2); store.save();
+  L.phase = 'done';
+}
+
+/* ---------- 2. Gramática com teste rápido ---------- */
+function grammarHTML(ch, id) {
+  const checks = checksOf(view.lvl, ch.n);
+  if (!ui.gc || ui.gc.length !== checks.length) ui.gc = checks.map(() => null);
+  const answered = ui.gc.filter(v => v !== null).length, right = ui.gc.filter((v, i) => v === checks[i][2]).length;
+  return `<p class="lead">Leia cada quadro e toque nos exemplos sublinhados para ouvir. No fim, faça o teste rápido: ele conclui a etapa.</p>` +
+  ch.grammar.map(g => `<div class="gram"><h4>${esc(g.t)}</h4>${g.h.replace(/<table>/g, '<div class="tblwrap"><table>').replace(/<\/table>/g, '</table></div>')}</div>`).join('') +
+  (checks.length ? `<div class="checks-block"><h4 class="serif">Teste rápido</h4>
+    ${checks.map((c, i) => { const pick = ui.gc[i], ok = pick === c[2]; const sent = /___/.test(c[0]) && !/:/.test(c[0]) ? c[0].replace('___', c[1][c[2]]) : null;
+      return `<div class="q"><div class="clz">${esc(c[0]).replace('___', `<span class="blank">${pick !== null ? esc(c[1][pick]) : '____'}</span>`)}</div>
+      <div class="opts">${c[1].map((o, j) => `<button type="button" data-act="gcheck" data-q="${i}" data-o="${j}" ${pick !== null ? 'disabled' : ''} class="${pick !== null && j === c[2] ? 'right' : ''} ${pick === j && !ok ? 'wrong' : ''}">${esc(o)}</button>`).join('')}</div>
+      ${pick !== null ? `<div class="fb ${ok ? 'right' : 'wrong'}">${ok ? 'Certo. ' : 'Não: é <b>' + esc(c[1][c[2]]) + '</b>. '}${esc(c[3])} ${sent ? sayBtn(sent, 'a frase', true) : ''}</div>` : ''}</div>`; }).join('')}
+    ${answered === checks.length ? `<div class="scorebox"><b class="num">${right}/${checks.length}</b><span>${right >= checks.length - 1 ? 'Muito bem!' : 'Releia os quadros e tente de novo.'}</span></div><button class="btn ghost sm" type="button" data-act="gretry">Refazer o teste</button>` : ''}
+  </div>` : '') + `
+  <div class="ask"><h4 class="serif" style="font-size:22px;margin:4px 0 8px">Ficou alguma dúvida?</h4>
+    <p class="lead" style="margin-bottom:10px">Pergunte em português. A resposta fica no nível deste capítulo.</p>
+    <textarea id="askq" placeholder="Ex.: por que é „w Polsce” e não „w Polska”?"></textarea>
+    <div class="bar-actions" style="margin-top:8px"><button class="btn sm" type="button" data-act="ask">Perguntar à IA</button></div>
+    <div class="answer" id="answer"></div></div>
+  ${stepFooter(id, 'gramatica', 'A etapa conclui quando você acertar o teste rápido (no máximo um erro).')}`;
+}
+
+/* ---------- 3. Diálogo: ouvir e fazer um papel ---------- */
+function dialogueHTML(ch, id) {
+  const lines = ch.dialogue.l, names = [...new Set(lines.map(l => l[0]))];
+  const modes = `<div class="subtabs" role="tablist">
+    <button type="button" role="tab" data-act="dmode" data-m="read" aria-selected="${ui.dmode === 'read'}">Ouvir e ler</button>
+    <button type="button" role="tab" data-act="dmode" data-m="role" aria-selected="${ui.dmode === 'role'}">Fazer um papel</button></div>`;
+  if (ui.dmode !== 'role') {
+    return `${modes}<h3>${esc(ch.dialogue.t)}</h3>
+    <p class="lead">Ouça uma fala por vez e repita. Depois esconda a tradução e, quando estiver seguro, passe para "Fazer um papel".</p>
+    <div class="bar-actions"><button class="btn sm" type="button" data-act="playall">Ouvir o diálogo inteiro</button>
+    <label class="toggle"><input type="checkbox" data-act="hidept" ${ui.hidePt ? 'checked' : ''}> Esconder tradução</label></div>
+    <div class="dlg ${ui.hidePt ? 'hide-pt' : ''}">${lines.map((l, i) => lineHTML(l, i, names)).join('')}</div>
+    ${stepFooter(id, 'dialogo', 'A etapa conclui quando você fizer um papel no diálogo com 70% de acerto.')}`;
+  }
+  const R = ui.rp;
+  if (!R) {
+    const counts = names.map(n => lines.filter(l => l[0] === n).length);
+    return `${modes}<h3>${esc(ch.dialogue.t)}</h3><p class="lead">Escolha quem você vai ser. Nas suas falas, você escolhe a frase certa entre três; as falas da outra pessoa aparecem e tocam sozinhas.</p>
+      <div class="bar-actions">${names.map((n, i) => `<button class="btn ${i ? 'ghost' : ''}" type="button" data-act="rpstart" data-n="${esc(n)}">Ser ${esc(n)} (${counts[i]} falas)</button>`).join('')}</div>
+      ${stepFooter(id, 'dialogo', 'A etapa conclui quando você fizer um papel com 70% de acerto.')}`;
+  }
+  const mine = lines.map((l, i) => l[0] === R.me ? i : -1).filter(i => i >= 0);
+  const right = Object.entries(R.picks).filter(([i, v]) => v === lines[i][1]).length;
+  const cur = lines[R.i];
+  return `${modes}<div class="learnhead"><button class="btn ghost sm" type="button" data-act="rpexit">← Trocar papel</button><span class="wc">Você é <b>${esc(R.me)}</b> · ${Object.keys(R.picks).length}/${mine.length} falas</span></div>
+    <div class="dlg ${ui.hidePt ? 'hide-pt' : ''}">${lines.slice(0, R.i).map((l, i) => lineHTML(l, i, names, R.picks[i] !== undefined && R.picks[i] !== l[1])).join('')}</div>
+    ${cur ? `<div class="q rpq"><div class="prompt">Sua fala (${esc(R.me)}) · em português: <b>${esc(cur[2])}</b></div>
+      <div class="opts one">${R.opts.map((o, j) => `<button type="button" data-act="rppick" data-o="${j}" lang="pl">${esc(o)}</button>`).join('')}</div></div>`
+    : `<div class="scorebox"><b class="num">${right}/${mine.length}</b><span>${right / mine.length >= .7 ? 'Diálogo feito! Agora tente o outro papel.' : 'Repita para fixar as falas.'}</span></div>
+      <div class="bar-actions"><button class="btn sm" type="button" data-act="rpstart" data-n="${esc(R.me)}">Repetir</button>${names.filter(n => n !== R.me).map(n => `<button class="btn ghost sm" type="button" data-act="rpstart" data-n="${esc(n)}">Ser ${esc(n)}</button>`).join('')}</div>`}
+    ${stepFooter(id, 'dialogo', 'A etapa conclui quando você fizer um papel com 70% de acerto.')}`;
+}
+function lineHTML(l, i, names, wasWrong) {
+  return `<div class="line ${names.indexOf(l[0]) % 2 ? 'r' : ''}" data-line="${i}">${sayBtn(l[1], 'a fala')}
+    <div class="bubble"><div class="who">${esc(l[0])}${wasWrong ? ' <span class="tagbad">corrigida</span>' : ''}</div><div class="plt" lang="pl">${esc(l[1])}</div><div class="ptt">${esc(l[2])}</div></div></div>`;
+}
+function rpAdvance(ch) {
+  const R = ui.rp, lines = ch.dialogue.l, toSay = [];
+  while (R.i < lines.length && lines[R.i][0] !== R.me) { toSay.push(lines[R.i][1]); R.i++; }
+  if (R.i < lines.length) {
+    const right = lines[R.i][1];
+    const pool = shuffle(lines.filter((l, j) => l[1] !== right && j !== R.i).map(l => l[1]));
+    R.opts = shuffle([right, ...pool.slice(0, 2)]);
+  }
+  if (toSay.length && audio.can()) { let k = 0; const nx = () => { if (k < toSay.length && view.tab === 'dialogo' && ui.rp === R) audio.say(toSay[k++], nx); }; nx(); }
+}
+
+/* ---------- 4. Prática: sessão mista, uma tarefa por vez ---------- */
+function makeSession(ch) {
+  const lvl = view.lvl, ws = chWords(lvl, ch), can = audio.can(), T = [];
+  const pick = n => shuffle(ws).slice(0, n);
+  const optsFor = (w, field) => shuffle([w[field], ...shuffle(ws.filter(x => x !== w && x[field] !== w[field]).map(x => x[field])).slice(0, 3)]);
+  pick(3).forEach(w => T.push({ k: 'mean', w, opts: optsFor(w, 'pt'), ans: w.pt }));
+  pick(2).forEach(w => can ? T.push({ k: 'listen', w, opts: shuffle([firstForm(w.pl), ...shuffle(ws.filter(x => x !== w).map(x => firstForm(x.pl))).slice(0, 3)]), ans: firstForm(w.pl) }) : T.push({ k: 'say', w, opts: optsFor(w, 'pl'), ans: w.pl }));
+  T.push({ k: 'match', words: pick(5) });
+  makeCloze(pick(3), ws).forEach(q => T.push(Object.assign({ k: 'cloze' }, q)));
+  pick(2).forEach(w => T.push({ k: 'type', w, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) }));
+  shuffle(ch.fill).slice(0, 2).forEach(f => T.push({ k: 'fill', f }));
+  T.push({ k: 'order', o: shuffle(ch.order)[0] });
+  if (can) { const w = shuffle(ws.filter(x => x.ex && plainEx(x.ex[0]).split(' ').length <= 7))[0]; if (w) T.push({ k: 'dict', w, text: plainEx(w.ex[0]) }); }
+  const first = T.filter(t => ['mean', 'listen', 'say', 'match'].includes(t.k)), rest = shuffle(T.filter(t => !['mean', 'listen', 'say', 'match'].includes(t.k)));
+  const tasks = [...shuffle(first), ...rest];
+  tasks.forEach(t => { if (t.k === 'order') { const toks = t.o[0].split(' '); let s = shuffle(toks); for (let i = 0; i < 5 && s.join(' ') === t.o[0]; i++) s = shuffle(toks); t.pool = s.map((x, i) => ({ t: x, i })); t.built = []; } if (t.k === 'match') t.m = makeMatch(t.words); });
+  return { tasks, i: 0, res: [], state: null };
+}
+const TASK_LABEL = { mean: 'O que significa?', listen: 'Ouça e escolha a palavra', say: 'Como se diz em polonês?', match: 'Ligue os pares', cloze: 'Complete o exemplo', type: 'Escreva em polonês', fill: 'Complete a frase', order: 'Monte a frase', dict: 'Ditado: ouça e escreva' };
+function practiceHTML(ch, id) {
+  const p = store.get(id);
+  if (!ui.ps) {
+    return `<h3>Prática</h3><p class="lead">Uma sessão de cerca de 15 tarefas variadas com as palavras e frases deste capítulo: significado, escuta, pares, exemplos para completar, escrever, montar frases e ditado. Com 70% ou mais a etapa fica concluída.</p>
+      <div class="bar-actions"><button class="btn accent" type="button" data-act="psstart">${p.pratica ? 'Nova sessão' : 'Começar a sessão'} →</button>${p.pratica ? `<span class="wc">Melhor resultado: <b class="num">${p.pratica}%</b></span>` : ''}</div>
+      ${!audio.can() ? '<p class="notice">Sem voz polonesa nesta tela, as tarefas de escuta e ditado ficam de fora. Veja "Ativar áudio" no topo.</p>' : ''}
+      ${stepFooter(id, 'pratica', 'Conclua uma sessão com 70% ou mais.')}`;
+  }
+  const S = ui.ps, t = S.tasks[S.i];
+  const bar = `<div class="psbar"><span class="track"><i style="width:${Math.round(S.i / S.tasks.length * 100)}%"></i></span><span class="wc num">${Math.min(S.i + 1, S.tasks.length)}/${S.tasks.length}</span><button class="btn ghost sm" type="button" data-act="psquit">Sair</button></div>`;
+  if (!t) {
+    const pct = Math.round(S.res.filter(Boolean).length / S.res.length * 100);
+    return `${bar}<div class="wcard"><div class="face">${pct}%</div><p class="meta">${S.res.filter(Boolean).length} de ${S.res.length} tarefas certas. ${pct >= 70 ? 'Etapa de prática concluída.' : 'Faça outra sessão: as tarefas mudam a cada vez.'}</p>
+      <div class="bar-actions" style="justify-content:center"><button class="btn sm" type="button" data-act="psstart">Nova sessão</button>${pct >= 70 ? '<button class="btn accent sm" type="button" data-act="tab" data-tab="redacao">Ir para a redação →</button>' : ''}</div></div>`;
+  }
+  const st = S.state;
+  let body = '';
+  const choice = (opts, ans, lang) => `<div class="opts">${opts.map((o, j) => `<button type="button" data-act="pspick" data-o="${j}" ${st ? 'disabled' : ''} ${lang ? 'lang="pl"' : ''} class="${st && o === ans ? 'right' : ''} ${st && st.pick === o && o !== ans ? 'wrong' : ''}">${esc(o)}</button>`).join('')}</div>`;
+  if (t.k === 'mean') body = `<div class="term" lang="pl">${esc(t.w.pl)} ${sayBtn(firstForm(t.w.pl), '', true)}</div>${choice(t.opts, t.ans)}`;
+  else if (t.k === 'say') body = `<div class="term">${esc(t.w.pt)}</div>${choice(t.opts, t.ans, true)}`;
+  else if (t.k === 'listen') body = `<div class="bar-actions"><button class="btn sm" type="button" data-say="${esc(t.ans)}">▶ Ouvir de novo</button></div>${choice(t.opts, t.ans, true)}`;
+  else if (t.k === 'cloze') body = `<div class="clz" lang="pl">${esc(t.a)}<span class="blank">${st ? esc(st.pick) : '____'}</span>${esc(t.b)}</div><div class="hint">${esc(t.pt)}</div>${choice(t.opts, t.ans, true)}`;
+  else if (t.k === 'match') body = matchHTML(t.m, 'psmatch');
+  else if (t.k === 'type') body = `<div class="term">${esc(t.w.pt)}</div>${t.w.ex ? `<div class="hint">Exemplo: ${esc(t.w.ex[1])}</div>` : ''}${inputHTML(st)}`;
+  else if (t.k === 'fill') { const [a, b] = t.f[0].split('___'); body = `<div class="clz" lang="pl">${esc(a)}<span class="blank">${st ? esc(st.v || '—') : '____'}</span>${esc(b)}</div><div class="hint">${esc(t.f[2])}</div>${inputHTML(st)}`; }
+  else if (t.k === 'dict') body = `<div class="bar-actions"><button class="btn sm" type="button" data-say="${esc(t.text)}">▶ Ouvir a frase</button><button class="btn ghost sm" type="button" data-act="slow" data-t="${esc(t.text)}">▶ Bem devagar</button></div>${inputHTML(st, true)}`;
+  else if (t.k === 'order') body = `<div class="hint" style="margin:0 0 6px">${esc(t.o[1])}</div>
+      <div class="tokens built">${t.built.map((tk, j) => `<button type="button" data-act="psunpick" data-j="${j}" ${st ? 'disabled' : ''}>${esc(tk.t)}</button>`).join('')}</div>
+      <div class="tokens">${t.pool.map((tk, j) => `<button type="button" data-act="pstok" data-j="${j}" ${st ? 'disabled' : ''}>${esc(tk.t)}</button>`).join('')}</div>
+      ${!t.pool.length && !st ? `<button class="btn sm" type="button" data-act="pscheck">Verificar</button>` : ''}`;
+  return `${bar}<div class="q pst"><div class="prompt">${TASK_LABEL[t.k]}</div>${body}${st ? feedbackHTML(t, st) : ''}</div>`;
+}
+function inputHTML(st, wide) {
+  return `${keysHTML()}<div class="bar-actions"><input class="pinput ${st ? st.res : ''} ${wide ? 'wide' : ''}" id="pinput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" lang="pl" value="${st ? esc(st.v) : ''}" ${st ? 'disabled' : ''} aria-label="Sua resposta">${st ? '' : '<button class="btn sm" type="button" data-act="pscheck">Verificar</button>'}</div>`;
+}
+function taskAnswer(t) {
+  return t.k === 'type' ? t.ans[0] : t.k === 'fill' ? t.f[1] : t.k === 'dict' ? t.text : t.k === 'order' ? t.o[0] : t.ans;
+}
+function feedbackHTML(t, st) {
+  const ok = st.res === 'right' || st.res === 'close';
+  const ans = taskAnswer(t);
+  const ex = t.w && t.w.ex ? t.w.ex : null;
+  const full = t.k === 'fill' ? (t.f[0].replace('___', t.f[1])).replace(/\(.*?\)/g, '') : t.k === 'cloze' ? t.a + t.ans + t.b : null;
+  return `<div class="fb ${st.res}">${st.res === 'right' ? 'Certo!' : st.res === 'close' ? 'Quase: confira os acentos. A forma certa é <b>' + esc(ans) + '</b>.' : t.k === 'match' ? 'Feito, com ' + st.miss + ' erro(s).' : 'A resposta é <b>' + esc(ans) + '</b>.'}
+    ${full ? sayBtn(full, 'a frase', true) : t.k === 'match' ? '' : sayBtn(ans, 'a resposta', true)}</div>
+    ${ex && t.k !== 'cloze' && t.k !== 'dict' ? `<div class="example small"><div class="exl" lang="pl">${markHTML(ex[0])} ${sayBtn(plainEx(ex[0]), 'o exemplo', true)}</div><div class="ext">${esc(ex[1])}</div></div>` : ''}
+    <div class="bar-actions" style="margin-top:10px"><button class="btn sm" type="button" data-act="psnext" id="psnext">Continuar →</button></div>`;
+}
+function psRecord(t, res, extra) {
+  const S = ui.ps; S.state = Object.assign({ res }, extra || {});
+  const ok = res === 'right' || res === 'close';
+  S.res[S.i] = ok;
+  if (t.w) { const k = wkey(view.lvl, t.w.pl); store.setBox(k, ok ? store.box(k) + 1 : Math.min(store.box(k), 1)); }
+  if (ok && audio.can() && t.k !== 'match') { const ans = t.k === 'fill' ? t.f[0].replace('___', t.f[1]).replace(/\(.*?\)/g, '') : t.k === 'cloze' ? t.a + t.ans + t.b : taskAnswer(t); audio.say(ans); }
+}
+function psFinish(ch, id) {
+  const S = ui.ps, pct = Math.round(S.res.filter(Boolean).length / S.res.length * 100), p = store.get(id);
+  p.pratica = Math.max(p.pratica || 0, pct);
+  (p.sessions = p.sessions || []).push(pct); if (p.sessions.length > 20) p.sessions = p.sessions.slice(-20);
+  store.data.last = id; store.log(3); store.save();
+}
+
+/* Cartões */
+function startFlash(words, title, lvl) {
+  const q = shuffle(words);
+  ui.flash = { queue: q, total: q.length, firstTry: 0, missed: new Set(), shown: false, dir: ui.flash?.dir || 'pl', title, lvl };
+}
+function flashHTML() {
+  const f = ui.flash;
+  if (!f.queue.length) return `<div class="flash"><div><div class="face">Pronto!</div><p class="meta">Você acertou de primeira ${f.firstTry} de ${f.total}.</p>
+    <div class="bar-actions" style="justify-content:center"><button class="btn ghost sm" type="button" data-act="flashclose">Voltar à lista</button></div></div></div>`;
+  const w = f.queue[0];
+  const front = f.dir === 'pl' ? w.pl : w.pt, back = f.dir === 'pl' ? w.pt : w.pl;
+  return `<div class="bar-actions"><button class="btn ghost sm" type="button" data-act="flashclose">← Lista</button>
+    <label class="toggle"><input type="checkbox" data-act="flashdir" ${f.dir === 'pt' ? 'checked' : ''}> Começar pelo português</label>
+    <span class="wc num">${f.total - f.queue.length + 1} / ${f.total}${f.title ? ' · ' + esc(f.title) : ''}</span></div>
+  <div class="flash">
+    <div><div class="meta">${f.dir === 'pl' ? 'O que significa?' : 'Como se diz em polonês?'}</div>
+    <div class="face">${esc(front)}</div>
+    ${f.shown ? `<div class="back-face">${esc(back)}</div>${w.note ? `<div class="meta">${esc(w.note)}</div>` : ''}${w.ex ? exampleBlock(w.ex) : ''}` : ''}</div>
+    <div class="bar-actions" style="justify-content:center">
+      ${f.shown ? `<button class="btn ghost sm" type="button" data-act="fnot">Ainda não sei</button><button class="btn sm" type="button" data-act="fknow">Sabia</button>`
+        : `<button class="btn sm" type="button" data-act="fshow">Mostrar resposta</button>`}
+      ${sayBtn(w.pl.split(' / ')[0], 'a palavra')}
+    </div>
+  </div>`;
+}
+
+/* Redação */
+async function writingRender(ch, id) {
+  const e = await store.loadEssay(id);
+  if (view.name !== 'ch' || chId(view.lvl, view.n) !== id || view.tab !== 'redacao') return;
+  const sample = await getSample();
+  const el = document.getElementById('panel'); if (!el) return;
+  const last = ui.result || (e.attempts.length ? e.attempts[e.attempts.length - 1] : null);
+  const words = allWords(ch).filter(w => w.pl.length < 28 && !/…|\?/.test(w.pl)).map(w => w.pl.split(' / ')[0].replace(/\s*\(.*\)$/, ''));
+  el.innerHTML = `
+  <div class="task"><div class="eyebrow" style="margin-bottom:6px">Sua tarefa</div><p>${esc(ch.write.p)}</p>
+    <ul>${ch.write.c.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
+    <p class="hint" style="margin-top:8px">Mínimo de ${ch.write.min} palavras. Pode usar tudo dos capítulos anteriores.</p></div>
+  <div class="chips" aria-label="Vocabulário do capítulo">${words.slice(0, 30).map(w => `<button type="button" data-act="ins" data-k="${esc(w)}">${esc(w)}</button>`).join('')}</div>
+  <div class="keys">${LETTERS.map(l => `<button type="button" data-act="key" data-k="${l}">${l}</button>`).join('')}</div>
+  <textarea class="paper" id="essay" spellcheck="false" lang="pl" placeholder="Pisz tutaj… (escreva aqui)">${esc(e.draft || '')}</textarea>
+  <div class="bar-actions" style="margin-top:10px;justify-content:space-between">
+    <span class="wc num" id="wc"></span>
+    <span style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn ghost sm" type="button" data-act="readmine">Ouvir meu texto</button>
+      ${sample ? `<button class="btn accent" type="button" data-act="correct" id="correctBtn">Corrigir com IA</button>` : `<button class="btn" type="button" data-act="copyprompt">Copiar pedido de correção</button>`}
+    </span>
+  </div>
+  ${!sample ? `<div class="notice">A correção automática não está disponível nesta tela. Copie o pedido de correção e cole numa conversa com o Claude. Depois, marque a etapa abaixo.
+    <div class="bar-actions" style="margin:8px 0 0"><button class="btn ghost sm" type="button" data-act="manualdone">Marcar redação como feita</button></div></div>` : ''}
+  <div id="result">${last && last.result ? resultHTML(last.result) : ''}</div>
+  ${e.attempts.length ? `<div class="history">Tentativas: ${e.attempts.map((a, i) => `<button type="button" data-act="showatt" data-i="${i}">#${i + 1} · nota ${esc(a.result?.nota ?? '–')}</button>`).join(' · ')}</div>` : ''}
+  ${stepFooter(id, 'redacao', 'A etapa é concluída quando a redação for corrigida com nota 5 ou mais.')}`;
+  updateWC(ch);
+}
+function updateWC(ch) {
+  const ta = document.getElementById('essay'), wc = document.getElementById('wc'); if (!ta || !wc) return;
+  const n = (ta.value.match(/[\p{L}\p{N}]+/gu) || []).length;
+  wc.textContent = `${n} / ${ch.write.min} palavras`;
+  wc.classList.toggle('ok', n >= ch.write.min);
+}
+function studiedSummary(lvl, upto) {
+  const order = COURSE.meta.map(m => m.id), prev = order.slice(0, order.indexOf(lvl)).filter(l => level(l).length);
+  const before = prev.map(l => `Todo o ${l.toUpperCase()}: ${level(l).flatMap(c => c.grammar.map(g => g.t)).join('; ')}`).join('\n');
+  return (before ? before + '\n' : '') + level(lvl).filter(c => c.n <= upto).map(c => `Cap. ${c.n} (${c.pt}): ${c.grammar.map(g => g.t).join('; ')}`).join('\n');
+}
+function correctionPrompt(ch, text) {
+  const vocab = allWords(ch).map(w => `${w.pl} = ${w.pt}`).join('; ');
+  return `Você é um professor de polonês nativo, paciente e exigente na medida certa. Seu aluno é brasileiro, fala português do Brasil e está no nível ${view.lvl.toUpperCase()}, capítulo ${ch.n}: "${ch.pl}" (${ch.pt}).
+
+O que ele já estudou até aqui (não cobre nem ensine gramática além disso):
+${studiedSummary(view.lvl, ch.n)}
+
+Vocabulário deste capítulo: ${vocab}
+
+Tarefa da redação: ${ch.write.p}
+Checklist: ${ch.write.c.map((c, i) => `${i + 1}. ${c}`).join(' ')}
+Mínimo: ${ch.write.min} palavras.
+
+Texto do aluno:
+<<<
+${text}
+>>>
+
+Corrija o texto. Mantenha o estilo e as ideias do aluno; mude só o necessário para ficar correto e natural. Erros de diacríticos (ex.: "zle" em vez de "źle") contam como ortografia. Se o texto não estiver em polonês, dê nota 0 e explique.
+Responda SOMENTE com JSON válido, sem texto antes ou depois, neste formato:
+{"nota": número de 0 a 10 (pode ter meio ponto),
+ "resumo": "2 a 3 frases em português do Brasil, honestas e encorajadoras",
+ "corrigido": "o texto completo corrigido, em polonês",
+ "erros": [{"trecho": "como o aluno escreveu", "correcao": "forma correta", "tipo": "gramática | vocabulário | ortografia | ordem | registro", "explicacao": "1 ou 2 frases em português, citando a regra do capítulo quando houver"}],
+ "checklist": [{"item": "texto do item", "ok": true ou false, "comentario": "curto"}],
+ "pontos_fortes": ["…"],
+ "proximo_passo": "uma dica concreta para a próxima tentativa",
+ "frases_modelo": [{"pl": "frase natural que o aluno poderia usar, só com vocabulário e gramática já estudados", "pt": "tradução"}]}
+Liste no máximo 10 erros, os mais importantes primeiro. Dê 2 ou 3 frases-modelo.`;
+}
+function parseJSON(t) {
+  if (t && typeof t === 'object') return t;
+  const s = String(t || ''); const a = s.indexOf('{'), b = s.lastIndexOf('}');
+  if (a < 0 || b < a) throw new Error('sem JSON');
+  return JSON.parse(s.slice(a, b + 1));
+}
+function resultHTML(r) {
+  const errs = Array.isArray(r.erros) ? r.erros : [], chk = Array.isArray(r.checklist) ? r.checklist : [];
+  const good = Array.isArray(r.pontos_fortes) ? r.pontos_fortes : [], models = Array.isArray(r.frases_modelo) ? r.frases_modelo : [];
+  return `<div class="result">
+    <div class="grade"><b class="num">${esc(r.nota)}</b><span class="eyebrow">de 10</span></div>
+    <p>${esc(r.resumo)}</p>
+    ${r.corrigido ? `<h4>Texto corrigido</h4><div class="corrected" lang="pl">${esc(r.corrigido)}</div>
+      <div class="bar-actions" style="margin-top:8px">${sayBtn(String(r.corrigido).slice(0, 1900), 'o texto corrigido')}<span class="wc">Ouvir a versão corrigida</span></div>` : ''}
+    ${errs.length ? `<h4>Correções (${errs.length})</h4>${errs.map(x => `<div class="err"><div class="pair"><s>${esc(x.trecho)}</s>→<ins>${esc(x.correcao)}</ins>${sayBtn(x.correcao || '', 'a correção', true)}${x.tipo ? `<span class="tag">${esc(x.tipo)}</span>` : ''}</div><p>${esc(x.explicacao)}</p></div>`).join('')}` : '<h4>Correções</h4><p>Nenhum erro encontrado.</p>'}
+    ${chk.length ? `<h4>Checklist da tarefa</h4><ul class="checks">${chk.map(c => `<li><span class="m ${c.ok ? 'y' : 'n'}">${c.ok ? '✓' : '✗'}</span><span>${esc(c.item)}${c.comentario ? ` <span class="wc">· ${esc(c.comentario)}</span>` : ''}</span></li>`).join('')}</ul>` : ''}
+    ${good.length ? `<h4>O que ficou bom</h4><ul>${good.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : ''}
+    ${models.length ? `<h4>Frases-modelo</h4>${models.map(m => `<div class="model"><div class="plt">${esc(m.pl)} ${sayBtn(m.pl || '', 'a frase', true)}</div><div class="ptt">${esc(m.pt)}</div></div>`).join('')}` : ''}
+    ${r.proximo_passo ? `<h4>Próximo passo</h4><p>${esc(r.proximo_passo)}</p>` : ''}
+  </div>`;
+}
+let correcting = false;
+async function doCorrect(ch, id) {
+  if (correcting) return;
+  const ta = document.getElementById('essay'); const text = ta.value.trim();
+  const n = (text.match(/[\p{L}\p{N}]+/gu) || []).length;
+  if (n < Math.min(8, ch.write.min)) { toast('Escreva um pouco mais antes de corrigir.'); return; }
+  const sample = await getSample(); if (!sample) return;
+  correcting = true;
+  const btn = document.getElementById('correctBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Corrigindo…';
+  const out = document.getElementById('result'); out.innerHTML = '';
+  try {
+    const prompt = correctionPrompt(ch, text);
+    let r;
+    try { r = typeof sample.json === 'function' ? await sample.json(prompt, { modelTier: 'default' }) : null; } catch (e) { if (e && (e.code === 'not_granted' || e.code === 'rate_limited')) throw e; r = null; }
+    if (!r) { const res = await sample(prompt, { modelTier: 'default' }); r = parseJSON(res.text); }
+    if (typeof r === 'string') r = parseJSON(r);
+    const e = await store.loadEssay(id);
+    const at = new Date().toISOString();
+    e.attempts.push({ text, result: r, at });
+    if (e.attempts.length > 8) e.attempts = e.attempts.slice(-8);
+    e.draft = text;
+    store.saveEssay(id, true);
+    ui.result = e.attempts[e.attempts.length - 1];
+    const nota = Number(r.nota); const p = store.get(id);
+    p.redacao = Math.max(typeof p.redacao === 'number' ? p.redacao : 0, isNaN(nota) ? 0 : nota);
+    if (!isNaN(nota)) { store.data.grades.push({ id, n: nota, at, w: n }); if (store.data.grades.length > 200) store.data.grades = store.data.grades.slice(-200); }
+    store.data.last = id; store.log(2); store.save(true);
+    writingRender(ch, id);
+    setTimeout(() => document.getElementById('result')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  } catch (e) {
+    out.innerHTML = `<div class="notice">${e && e.code === 'rate_limited' ? 'Muitas correções seguidas. Espere um minuto e tente de novo.' : e && e.code === 'not_granted' ? 'A correção por IA foi recusada nesta tela. Use "Copiar pedido de correção".' : 'Não consegui ler a correção desta vez. Tente de novo.'}</div>`;
+    btn.disabled = false; btn.textContent = 'Corrigir com IA';
+  } finally { correcting = false; }
+}
+
+/* ---------- Banco de vocabulário ---------- */
+function renderBank() {
+  const lvl = view.lvl, meta = COURSE.meta.find(m => m.id === lvl), groups = bankGroups(lvl);
+  if (ui.flash) { app.innerHTML = `${helpSlot()}<div class="section-h"><h2>Cartões · ${esc(meta.name)}</h2></div><div class="panel">${flashHTML()}</div>`; return; }
+  const all = bankWords(lvl), mast = all.filter(w => mastered(wkey(lvl, w.pl))).length;
+  const q = ui.bankQ.trim().toLowerCase(), qs = strip(q);
+  const match = w => !q || strip(w.pl.toLowerCase()).includes(qs) || strip(w.pt.toLowerCase()).includes(qs);
+  const filt = w => ui.bankF === 'all' ? true : ui.bankF === 'known' ? mastered(wkey(lvl, w.pl)) : !mastered(wkey(lvl, w.pl));
+  app.innerHTML = `${helpSlot()}
+  <section class="hero" style="padding-bottom:6px"><div>
+    <div class="eyebrow">Banco de vocabulário · ${esc(meta.name)} · ${esc(meta.title)}</div>
+    <h1>${all.length} palavras do <em>${esc(meta.name)}</em></h1>
+    <p>Organizadas pelos temas oficiais do nível. Marque o que você já domina, ouça cada palavra e treine as que faltam.</p>
+  </div><div class="bigglyph" aria-hidden="true" style="font-size:clamp(70px,16vw,120px)">${mast}<small>dominadas</small></div>
+  <div class="meter"><div class="bar"><i style="width:${all.length ? Math.round(mast / all.length * 100) : 0}%"></i></div><span class="num">${mast}/${all.length} · ${all.length ? Math.round(mast / all.length * 100) : 0}%</span></div></section>
+  <div class="bankhead">
+    <input type="search" id="bankq" placeholder="Buscar em polonês ou português…" value="${esc(ui.bankQ)}" aria-label="Buscar palavra">
+    <div class="filters">${[['all', 'Todas'], ['todo', 'Para aprender'], ['known', 'Dominadas']].map(([k, l]) => `<button type="button" data-act="bankf" data-f="${k}" aria-pressed="${ui.bankF === k}">${l}</button>`).join('')}</div>
+    <button class="btn sm" type="button" data-act="bankflash" data-g="-1">Treinar 20 palavras</button>
+  </div>
+  <div id="banklist">
+  ${groups.map((g, gi) => {
+    const ws = g.w.map(w => ({ pl: w[0], pt: w[1], g: w[2] || '', note: w[3] || '' }));
+    const shown = ws.filter(w => match(w) && filt(w));
+    if (!shown.length) return '';
+    const gm = ws.filter(w => mastered(wkey(lvl, w.pl))).length;
+    const open = q || ui.open[lvl + gi];
+    return `<details class="bgroup" data-g="${gi}" ${open ? 'open' : ''}><summary><span><span class="ttl serif">${esc(g.t)}</span><span class="sub">${esc(g.pl)} · ${ws.length} palavras · ${gm} dominadas <span class="minibar"><i style="width:${Math.round(gm / ws.length * 100)}%"></i></span></span></span><span class="sub">▾</span></summary>
+      <div class="groupbar"><button class="btn ghost sm" type="button" data-act="bankflash" data-g="${gi}">Treinar este tema</button>${sayBtn(ws.slice(0, 12).map(w => speakable(w.pl.split(' / ')[0])).join(', '), 'as primeiras palavras do tema')}<span class="wc say-label">ouvir as 12 primeiras</span></div>
+      ${shown.map(w => { const k = wkey(lvl, w.pl), kn = mastered(k); return `<div class="brow ${kn ? 'known' : ''}"><span class="pl">${esc(w.pl)}</span><span class="tr">${esc(w.pt)}</span>${w.g ? `<span class="g" title="${({ m: 'masculino', f: 'feminino', n: 'neutro', pl: 'plural', v: 'verbo' })[w.g] || ''}">${esc(w.g)}</span>` : '<span></span>'}${sayBtn(w.pl.split(' / ')[0])}<button class="knowbtn" type="button" data-act="know" data-k="${esc(k)}" aria-pressed="${kn}" aria-label="${kn ? 'Desmarcar' : 'Marcar como dominada'}">✓</button>${w.note ? `<span class="note">${esc(w.note)}</span>` : ''}<span class="note"><button class="linkbtn" type="button" data-act="bex" data-w="${esc(w.pl)}" data-t="${esc(w.pt)}" data-l="${lvl}">${exCache[k] || ui.bex[k] ? '' : 'Ver exemplos em frases'}</button></span>${bankExHTML(k)}</div>`; }).join('')}
+    </details>`;
+  }).join('') || '<p class="empty">Nenhuma palavra encontrada com esse filtro.</p>'}
+  </div>
+  <p class="statnote">Legenda: m, f, n = gênero do substantivo; pl = só plural; v = verbo. Uma palavra conta como dominada quando você acerta duas vezes nos cartões ou marca ✓.</p>`;
+}
+
+/* ---------- Estatísticas ---------- */
+function levelStats(lvl) {
+  const chs = level(lvl), voc = levelVocab(lvl);
+  let mast = 0; for (const k of voc.keys()) if (mastered(k)) mast++;
+  return { chs, voc: voc.size, mast, done: chs.filter(c => chDone(chId(lvl, c.n))).length };
+}
+function streak() {
+  const d = new Date(); let n = 0;
+  const key = x => x.getFullYear() + '-' + pad(x.getMonth() + 1) + '-' + pad(x.getDate());
+  if (!store.data.days[key(d)]) d.setDate(d.getDate() - 1);
+  while (store.data.days[key(d)]) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+function activitySVG() {
+  const days = []; const d = new Date(); d.setDate(d.getDate() - 27);
+  for (let i = 0; i < 28; i++) { const k = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); days.push({ k, v: store.data.days[k] || 0, lab: d.getDate() }); d.setDate(d.getDate() + 1); }
+  const max = Math.max(4, ...days.map(x => x.v)), W = 560, H = 150, bw = W / 28;
+  return `<svg viewBox="0 0 ${W} ${H + 22}" role="img" aria-label="Atividade dos últimos 28 dias">
+    <line class="grid" x1="0" x2="${W}" y1="${H}" y2="${H}"/>
+    ${days.map((x, i) => { const h = x.v ? Math.max(4, x.v / max * (H - 10)) : 2; return `<rect class="barf ${x.v ? '' : 'dim'}" x="${i * bw + 2}" y="${H - h}" width="${bw - 4}" height="${h}" rx="2"><title>${x.k}: ${x.v} atividades</title></rect>${i % 7 === 0 || i === 27 ? `<text class="axis" x="${i * bw + bw / 2}" y="${H + 15}" text-anchor="middle">${x.lab}</text>` : ''}`; }).join('')}
+  </svg>`;
+}
+function gradesSVG() {
+  const g = store.data.grades.slice(-20);
+  if (!g.length) return '<p class="empty">As notas das redações aparecem aqui depois da primeira correção.</p>';
+  const W = 560, H = 160, L = 26, step = g.length > 1 ? (W - L - 10) / (g.length - 1) : 0;
+  const y = v => H - v / 10 * (H - 10);
+  const pts = g.map((x, i) => [L + i * step, y(x.n)]);
+  return `<svg viewBox="0 0 ${W} ${H + 20}" role="img" aria-label="Notas das últimas redações">
+    ${[0, 5, 10].map(v => `<line class="grid" x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`).join('')}
+    ${g.length > 1 ? `<polyline class="linep" points="${pts.map(p => p.join(',')).join(' ')}"/>` : ''}
+    ${pts.map((p, i) => `<circle class="dot" cx="${p[0]}" cy="${p[1]}" r="${i === pts.length - 1 ? 5 : 3.5}"><title>Cap. ${g[i].id.split('-')[1]}: ${g[i].n}</title></circle>`).join('')}
+    <text class="axis" x="${pts[pts.length - 1][0]}" y="${pts[pts.length - 1][1] - 10}" text-anchor="end">${g[g.length - 1].n}</text>
+  </svg>`;
+}
+function renderStats() {
+  const lv = COURSE.meta.map(m => ({ m, s: levelStats(m.id) }));
+  const totalMast = Object.keys(store.data.known).filter(k => store.data.known[k] >= 2).length;
+  const grades = store.data.grades;
+  const avg = grades.length ? (grades.reduce((a, b) => a + b.n, 0) / grades.length) : 0;
+  const sess = Object.values(store.data.p).flatMap(p => p.sessions || []);
+  const pracAvg = sess.length ? Math.round(sess.reduce((a, b) => a + b, 0) / sess.length) : 0;
+  const activeDays = Object.keys(store.data.days).length;
+  const stopsRead = Object.keys(store.data.stops).length;
+  const slv = COURSE.meta.map(m => m.id).filter(l => level(l).length);
+  const chs = slv.flatMap(l => level(l).map(c => ({ l, c })));
+  const allStops = slv.reduce((a, l) => a + stopsOf(l).length, 0);
+  const empty = !activeDays && !totalMast && !grades.length;
+  app.innerHTML = `${helpSlot()}
+  <section class="hero" style="padding-bottom:4px"><div>
+    <div class="eyebrow">Seu histórico de estudo</div>
+    <h1>O que você <em>já fez</em></h1>
+    <p>${empty ? 'Ainda não há registros. Comece pelo capítulo 1: cada bloco de palavras, teste e sessão de prática aparece aqui.' : 'Contagem do que você estudou neste curso. Não é uma estimativa de nível: só mostra o caminho percorrido.'}</p>
+  </div></section>
+  <div class="tiles">
+    <div class="tile"><b>${totalMast}</b><span>palavras praticadas com acerto</span></div>
+    ${slv.map(l => `<div class="tile"><b>${levelStats(l).done}<small style="font-size:18px;color:var(--muted)">/${level(l).length}</small></b><span>capítulos ${l.toUpperCase()} completos</span></div>`).join('')}
+    <div class="tile"><b>${sess.length}</b><span>sessões de prática${sess.length ? ` · média ${pracAvg}%` : ''}</span></div>
+    <div class="tile"><b>${grades.length}</b><span>redações corrigidas${grades.length ? ` · média ${avg.toFixed(1)}` : ''}</span></div>
+    <div class="tile"><b>${streak()}</b><span>dias seguidos estudando</span></div>
+    <div class="tile"><b>${activeDays}</b><span>dias com estudo no total</span></div>
+    <div class="tile"><b>${stopsRead}<small style="font-size:18px;color:var(--muted)">/${allStops}</small></b><span>paradas visitadas</span></div>
+  </div>
+  ${slv.map(l => { const cs = level(l), cnt = step => cs.filter(c => stepDone(store.get(chId(l, c.n)), step)).length; return `<div class="section-h"><h2>Etapas concluídas no ${l.toUpperCase()}</h2></div>
+  <div class="skills">${STEPS.map(st => { const v = cnt(st.id); return `<div class="skill"><span>${st.label}</span><span class="track"><i style="width:${cs.length ? Math.round(v / cs.length * 100) : 0}%"></i></span><span class="v">${v}/${cs.length}</span></div>`; }).join('')}</div>`; }).join('')}
+  <div class="section-h"><h2>Notas das redações</h2></div>
+  <div class="chartbox">${gradesSVG()}</div>
+  <div class="section-h"><h2>Atividade nos últimos 28 dias</h2></div>
+  <div class="chartbox">${activitySVG()}</div>
+  <div class="section-h"><h2>Palavras praticadas por nível</h2></div>
+  <div class="skills">${lv.map(({ m, s }) => `<div class="skill"><span>${m.name}</span><span class="track"><i style="width:${s.voc ? Math.round(s.mast / s.voc * 100) : 0}%"></i></span><span class="v">${s.mast}/${s.voc}</span></div>`).join('')}</div>
+  <p class="statnote">Uma palavra conta quando você acerta duas vezes nos exercícios ou nos cartões, ou marca ✓ no banco de vocabulário.</p>
+  <div class="resetbox">${ui.resetAsk ? `<p><b>Apagar todo o progresso?</b> Isso zera etapas, palavras, redações e histórico, neste aparelho e na sua conta. Não dá para desfazer.</p>
+    <div class="bar-actions"><button class="btn accent sm" type="button" data-act="resetyes">Sim, recomeçar do zero</button><button class="btn ghost sm" type="button" data-act="resetno">Cancelar</button></div>`
+    : `<button class="btn ghost sm" type="button" data-act="resetask">Recomeçar do zero</button>`}</div>`;
+}
+async function resetAll() {
+  const ids = Object.keys(store.essays).concat(COURSE.meta.flatMap(m => level(m.id).map(c => chId(m.id, c.n))));
+  store.data = blank(); store.essays = {};
+  try { localStorage.removeItem(store.key + '-essays'); } catch (e) {}
+  store.save(true);
+  if (store.db) { for (const id of [...new Set(ids)]) { try { await store.essayRef(id).delete(); } catch (e) {} } }
+  ui.resetAsk = false; ui.learn = null; ui.ps = null; ui.rp = null; ui.gc = null;
+  toast('Progresso apagado. Bom recomeço!'); go('nivel-a1');
+}
+/* Banco: exemplos gerados pela IA, guardados neste aparelho */
+let exCache = {}; try { exCache = JSON.parse(localStorage.getItem('polski-ex-cache') || '{}'); } catch (e) {}
+function bankExHTML(k) {
+  const v = ui.bex[k] || exCache[k];
+  if (!v) return '';
+  if (v === 'loading') return '<span class="vex"><span class="spinner"></span> Criando exemplos…</span>';
+  if (typeof v === 'string') return `<span class="vex">${esc(v)}</span>`;
+  return `<span class="vex">${v.map(x => `<span lang="pl">${esc(x.pl)}</span> ${sayBtn(x.pl, 'o exemplo', true)}<br><span class="tr">${esc(x.pt)}</span>`).join('<br>')}</span>`;
+}
+async function bankExamples(pl, pt, lvl, btn) {
+  const k = wkey(lvl, pl);
+  if (exCache[k]) { ui.bex[k] = exCache[k]; render(); return; }
+  const sample = await getSample();
+  if (!sample) { ui.bex[k] = 'A IA não está disponível nesta tela para criar exemplos.'; render(); return; }
+  ui.bex[k] = 'loading'; render();
+  const prompt = `Crie 2 frases de exemplo curtas e naturais em polonês usando "${pl}" (significado: ${pt}), adequadas ao nível ${lvl.toUpperCase()} do QECR, para um aluno brasileiro. Use a palavra numa forma correta no contexto (pode flexionar). Responda SOMENTE com JSON: [{"pl": "frase em polonês", "pt": "tradução para o português do Brasil"}, {"pl": "...", "pt": "..."}]`;
+  try {
+    let r = null;
+    try { r = typeof sample.json === 'function' ? await sample.json(prompt, { modelTier: 'quick' }) : null; } catch (e) { if (e && e.code === 'rate_limited') throw e; }
+    if (!r) { const res = await sample(prompt, { modelTier: 'quick' }); const t = res.text, a = t.indexOf('['), b = t.lastIndexOf(']'); r = JSON.parse(t.slice(a, b + 1)); }
+    if (!Array.isArray(r)) r = r.exemplos || r.examples || [];
+    r = r.filter(x => x && x.pl).slice(0, 3);
+    exCache[k] = r; ui.bex[k] = r; try { localStorage.setItem('polski-ex-cache', JSON.stringify(exCache)); } catch (e) {}
+    store.log(); store.save();
+  } catch (e) { ui.bex[k] = e && e.code === 'rate_limited' ? 'Muitos pedidos seguidos. Tente daqui a pouco.' : 'Não consegui criar exemplos agora.'; }
+  render();
+}
+
+/* ---------- Eventos ---------- */
+function insertAt(el, txt) {
+  if (!el) return;
+  const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? el.value.length;
+  el.value = el.value.slice(0, s) + txt + el.value.slice(e);
+  el.selectionStart = el.selectionEnd = s + txt.length; el.focus();
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+let lastField = null;
+document.addEventListener('focusin', e => { if (e.target.matches('#essay, #pinput, #askq')) lastField = e.target; });
+document.addEventListener('mousedown', e => { if (e.target.closest('.keys button, .chips button')) e.preventDefault(); });
+
+let bankTimer = null;
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'essay' && view.name === 'ch') {
+    const ch = findCh(view.lvl, view.n), id = chId(view.lvl, view.n);
+    updateWC(ch);
+    const ess = store.essays[id]; if (ess) { ess.draft = t.value; store.saveEssay(id); }
+  }
+  if (t.id === 'bankq') {
+    ui.bankQ = t.value; clearTimeout(bankTimer);
+    bankTimer = setTimeout(() => { const pos = t.selectionStart; render(); const n = document.getElementById('bankq'); if (n) { n.focus(); n.setSelectionRange(pos, pos); } }, 250);
+  }
+});
+document.addEventListener('toggle', e => { const d = e.target; if (d.matches && d.matches('details.bgroup')) ui.open[view.lvl + d.dataset.g] = d.open; }, true);
+document.addEventListener('change', e => {
+  const a = e.target.dataset.act; if (!a) return;
+  if (a === 'hidetr') { ui.hideTr = e.target.checked; render(); }
+  if (a === 'hidept') { ui.hidePt = e.target.checked; render(); }
+  if (a === 'flashdir') { ui.flash.dir = e.target.checked ? 'pt' : 'pl'; ui.flash.shown = false; render(); }
+});
+document.addEventListener('click', async e => {
+  const gi = e.target.closest('.gram i');
+  if (gi && audio.can()) { audio.say(gi.textContent); return; }
+  const sb = e.target.closest('[data-say]');
+  if (sb) { audio.say(sb.dataset.say); return; }
+  const b = e.target.closest('[data-act]'); if (!b || b.tagName === 'INPUT') return;
+  const a = b.dataset.act;
+  const ch = view.name === 'ch' ? findCh(view.lvl, view.n) : null, id = ch ? chId(view.lvl, view.n) : null;
+  switch (a) {
+    case 'level': go(b.dataset.go); break;
+    case 'audiohelp': ui.showHelp = !ui.showHelp; render(); if (ui.showHelp) document.getElementById('audiohelp')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); break;
+    case 'rate': audio.rate = +b.dataset.r; try { localStorage.setItem('polski-rate', audio.rate); } catch (err) {} render(); audio.say('Dzień dobry!'); break;
+    case 'tab': go(`${view.lvl}-${view.n}-${b.dataset.tab}`); document.querySelector('.tabs')?.scrollIntoView({ block: 'start' }); break;
+    case 'mark': store.mark(id, b.dataset.step); toast('Etapa concluída'); render(); break;
+    case 'stopread': store.data.stops[b.dataset.k] = 1; store.log(); store.save(); toast('Parada marcada como lida'); render(); break;
+    case 'flash': startFlash(chWords(view.lvl, ch), ch.pl, view.lvl); render(); break;
+    case 'bankflash': {
+      const lvl = view.lvl, g = +b.dataset.g;
+      const pool = (g >= 0 ? bankGroups(lvl)[g].w.map(w => ({ pl: w[0], pt: w[1], note: w[3] || '' })) : bankWords(lvl));
+      const todo = pool.filter(w => !mastered(wkey(lvl, w.pl)));
+      const pick = shuffle(todo.length ? todo : pool).slice(0, 20);
+      startFlash(pick, g >= 0 ? bankGroups(lvl)[g].t : '20 palavras', lvl); render(); window.scrollTo(0, 0); break;
+    }
+    case 'flashclose': ui.flash = null; render(); break;
+    case 'fshow': ui.flash.shown = true; render(); break;
+    case 'fknow': { const f = ui.flash, w = f.queue.shift(); if (!f.missed.has(w)) f.firstTry++; const k = wkey(f.lvl, w.pl); store.setBox(k, store.box(k) + (f.missed.has(w) ? 0 : 1)); f.shown = false; render(); break; }
+    case 'fnot': { const f = ui.flash, w = f.queue.shift(); f.missed.add(w); const k = wkey(f.lvl, w.pl); if (store.box(k) > 1) store.setBox(k, 1); f.queue.splice(Math.min(3, f.queue.length), 0, w); f.shown = false; render(); break; }
+    case 'know': { const k = b.dataset.k; store.setBox(k, mastered(k) ? 0 : 3); render(); break; }
+    case 'bankf': ui.bankF = b.dataset.f; render(); break;
+    case 'playall': {
+      const lines = [...document.querySelectorAll('.line')]; let i = 0;
+      const next = () => { lines.forEach(l => l.classList.remove('speaking')); if (i >= lines.length || view.tab !== 'dialogo') return; const l = lines[i]; l.classList.add('speaking'); l.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); const txt = ch.dialogue.l[i][1]; i++; audio.say(txt, next); };
+      if (!audio.can()) { ui.showHelp = true; render(); break; } next(); break;
+    }
+    /* Palavras */
+    case 'vmode': ui.vmode = b.dataset.m; ui.learn = null; render(); break;
+    case 'lstart': { const bs = batchesOf(view.lvl, ch), bi = +b.dataset.b; if (!bs[bi]) break; ui.learn = { b: bi, phase: 'cards', i: 0 }; render(); document.querySelector('.tabs')?.scrollIntoView({ block: 'start' }); audio.can() && audio.say(firstForm(bs[bi][0].pl)); break; }
+    case 'lexit': ui.learn = null; render(); break;
+    case 'lprev': ui.learn.i = Math.max(0, ui.learn.i - 1); render(); break;
+    case 'lnext': {
+      const L = ui.learn, batch = batchesOf(view.lvl, ch)[L.b];
+      store.log(); if (L.i < batch.length - 1) { L.i++; render(); audio.can() && audio.say(firstForm(batch[L.i].pl)); break; }
+      if (batch.length >= 2) { L.phase = 'match'; L.m = makeMatch(batch); } else { L.m = { miss: 0 }; L.phase = 'cloze'; L.cz = makeCloze(batch, chWords(view.lvl, ch)); L.ci = 0; }
+      render(); break;
+    }
+    case 'lmatch': {
+      const L = ui.learn, batch = batchesOf(view.lvl, ch)[L.b];
+      if (matchTap(L.m, b.dataset.side, +b.dataset.i, batch)) { L.phase = 'cloze'; L.cz = makeCloze(batch, chWords(view.lvl, ch)); L.ci = 0; if (!L.cz.length) finishBatch(ch, id); }
+      render(); break;
+    }
+    case 'lcz': { const q = ui.learn.cz[ui.learn.ci]; q.pick = q.opts[+b.dataset.o]; if (q.pick === q.ans && audio.can()) audio.say(q.a + q.ans + q.b); render(); break; }
+    case 'lczn': { const L = ui.learn; if (L.ci < L.cz.length - 1) L.ci++; else finishBatch(ch, id); render(); break; }
+    /* Gramática */
+    case 'gcheck': {
+      const c = checksOf(view.lvl, ch.n), qi = +b.dataset.q; ui.gc[qi] = +b.dataset.o;
+      const okc = ui.gc[qi] === c[qi][2]; const sent = /___/.test(c[qi][0]) && !/:/.test(c[qi][0]) ? c[qi][0].replace('___', c[qi][1][c[qi][2]]) : null;
+      if (okc && sent && audio.can()) audio.say(sent);
+      if (ui.gc.every(v => v !== null)) { const right = ui.gc.filter((v, i) => v === c[i][2]).length; if (right >= c.length - 1 && !store.get(id).gramatica) { store.mark(id, 'gramatica'); toast('Etapa Gramática concluída'); } }
+      store.log(); render(); break;
+    }
+    case 'gretry': ui.gc = null; render(); break;
+    /* Diálogo */
+    case 'dmode': ui.dmode = b.dataset.m; ui.rp = null; render(); break;
+    case 'rpstart': ui.rp = { me: b.dataset.n, i: 0, picks: {}, opts: [] }; rpAdvance(ch); render(); break;
+    case 'rpexit': ui.rp = null; render(); break;
+    case 'rppick': {
+      const R = ui.rp, lines = ch.dialogue.l, choice = R.opts[+b.dataset.o], right = lines[R.i][1];
+      R.picks[R.i] = choice; toast(choice === right ? 'Certo!' : 'Quase. Veja a fala certa no diálogo.');
+      const said = right; R.i++;
+      const goOn = () => { rpAdvance(ch); render(); };
+      if (audio.can()) { render(); audio.say(said, goOn); } else goOn();
+      if (R.i >= lines.length || !lines.slice(R.i).some(l => l[0] === R.me)) {
+        const mine = lines.map((l, i) => l[0] === R.me ? i : -1).filter(i => i >= 0), ok = mine.filter(i => R.picks[i] === lines[i][1]).length;
+        if (mine.length && ok / mine.length >= .7 && !store.get(id).dialogo) { store.mark(id, 'dialogo'); toast('Etapa Diálogo concluída'); }
+      }
+      store.log(); break;
+    }
+    /* Prática */
+    case 'psstart': ui.ps = makeSession(ch); render(); document.querySelector('.tabs')?.scrollIntoView({ block: 'start' }); { const t = ui.ps.tasks[0]; if (t.k === 'listen') setTimeout(() => audio.say(t.ans), 300); } break;
+    case 'psquit': ui.ps = null; render(); break;
+    case 'pspick': {
+      const S = ui.ps, t = S.tasks[S.i]; if (S.state) break;
+      const pick = t.opts[+b.dataset.o]; psRecord(t, pick === t.ans ? 'right' : 'wrong', { pick }); render(); break;
+    }
+    case 'psmatch': {
+      const S = ui.ps, t = S.tasks[S.i]; if (S.state) break;
+      if (matchTap(t.m, b.dataset.side, +b.dataset.i, t.words)) { S.state = { res: t.m.miss <= 1 ? 'right' : 'wrong', miss: t.m.miss }; S.res[S.i] = t.m.miss <= 1; }
+      render(); break;
+    }
+    case 'pstok': { const t = ui.ps.tasks[ui.ps.i]; t.built.push(t.pool.splice(+b.dataset.j, 1)[0]); render(); break; }
+    case 'psunpick': { const t = ui.ps.tasks[ui.ps.i]; t.pool.push(t.built.splice(+b.dataset.j, 1)[0]); render(); break; }
+    case 'pscheck': {
+      const S = ui.ps, t = S.tasks[S.i]; if (S.state) break;
+      if (t.k === 'order') { psRecord(t, norm(t.built.map(x => x.t).join(' ')) === norm(t.o[0]) ? 'right' : 'wrong'); render(); break; }
+      const v = (document.getElementById('pinput') || {}).value || '';
+      if (!v.trim()) { toast('Escreva sua resposta.'); break; }
+      const answers = t.k === 'type' ? t.ans : t.k === 'fill' ? [t.f[1]] : [t.text];
+      psRecord(t, judge(v, answers), { v }); render(); break;
+    }
+    case 'psnext': {
+      const S = ui.ps; S.i++; S.state = null;
+      if (S.i >= S.tasks.length) psFinish(ch, id);
+      render(); document.querySelector('.tabs')?.scrollIntoView({ block: 'start' });
+      const t = S.tasks[S.i]; if (t && (t.k === 'listen')) setTimeout(() => audio.say(t.ans), 250); if (t && t.k === 'dict') setTimeout(() => audio.say(t.text), 250);
+      setTimeout(() => document.getElementById('pinput')?.focus(), 80); break;
+    }
+    case 'slow': { const r = audio.rate; audio.rate = 0.65; audio.say(b.dataset.t, () => { audio.rate = r; }); setTimeout(() => { audio.rate = r; }, 15000); break; }
+    /* Progresso */
+    case 'resetask': ui.resetAsk = true; render(); break;
+    case 'resetno': ui.resetAsk = false; render(); break;
+    case 'resetyes': await resetAll(); break;
+    /* Banco: exemplos por IA */
+    case 'bex': bankExamples(b.dataset.w, b.dataset.t, b.dataset.l, b); break;
+    case 'key': insertAt(lastField && document.body.contains(lastField) ? lastField : document.querySelector('#essay, #pinput'), b.dataset.k); break;
+    case 'ins': { const ta = document.getElementById('essay'); const v = ta.value; insertAt(ta, (v && !/\s$/.test(v.slice(0, ta.selectionStart)) ? ' ' : '') + b.dataset.k + ' '); audio.can() && audio.say(b.dataset.k); break; }
+    case 'readmine': { const t = document.getElementById('essay').value.trim(); if (!t) { toast('Escreva algo primeiro.'); break; } audio.say(t.slice(0, 1900)); break; }
+    case 'correct': doCorrect(ch, id); break;
+    case 'copyprompt': {
+      const text = document.getElementById('essay').value.trim();
+      if (!text) { toast('Escreva o texto primeiro.'); break; }
+      try { await navigator.clipboard.writeText(correctionPrompt(ch, text).replace('Responda SOMENTE com JSON válido, sem texto antes ou depois, neste formato:', 'Responda em português, organizado com estes campos:')); toast('Copiado. Cole numa conversa com o Claude.'); }
+      catch (err) { toast('Não consegui copiar nesta tela.'); }
+      break;
+    }
+    case 'manualdone': store.mark(id, 'redacao', true); toast('Redação marcada como feita'); writingRender(ch, id); break;
+    case 'showatt': { const e2 = await store.loadEssay(id); ui.result = e2.attempts[+b.dataset.i]; document.getElementById('result').innerHTML = resultHTML(ui.result.result); document.getElementById('result').scrollIntoView({ behavior: 'smooth' }); break; }
+    case 'ask': {
+      const q = document.getElementById('askq').value.trim(); const out = document.getElementById('answer');
+      if (!q) { toast('Escreva sua pergunta.'); break; }
+      const sample = await getSample();
+      if (!sample) { out.textContent = 'A IA não está disponível nesta tela. Copie a pergunta para uma conversa com o Claude.'; break; }
+      b.disabled = true; out.innerHTML = '<span class="spinner"></span> Pensando…';
+      const prompt = `Você é um professor de polonês para um aluno brasileiro (português do Brasil), nível ${view.lvl.toUpperCase()}, capítulo ${ch.n} ("${ch.pl}" – ${ch.pt}).\nO que ele já estudou:\n${studiedSummary(view.lvl, ch.n)}\n\nGramática deste capítulo (resumo): ${ch.grammar.map(g => g.t).join('; ')}.\n\nPergunta do aluno: ${q}\n\nResponda em português do Brasil, de forma clara e curta (até 150 palavras), com 2 ou 3 exemplos em polonês com tradução. Não use markdown com asteriscos; use quebras de linha simples.`;
+      try { const r = await sample(prompt, { modelTier: 'default', onText: ({ text }) => { out.textContent = text; } }); out.textContent = r.text; store.log(); store.save(); }
+      catch (err) { out.textContent = err && err.code === 'rate_limited' ? 'Muitas perguntas seguidas. Espere um pouco.' : 'Não consegui responder agora. Tente de novo.'; }
+      b.disabled = false; break;
+    }
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'pinput') { e.preventDefault(); document.querySelector('[data-act="pscheck"]')?.click(); }
+  else if (e.key === 'Enter' && document.getElementById('psnext') && !e.target.matches('textarea, input')) { e.preventDefault(); document.getElementById('psnext').click(); }
+});
+
+/* ---------- Início ---------- */
+route();
+store.init();
+audio.init();
+setSync('Progresso salvo neste navegador.');
+})();
