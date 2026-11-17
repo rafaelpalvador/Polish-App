@@ -444,6 +444,23 @@ mark { background: var(--accent-soft); color: var(--accent); border-radius: 4px;
 .revbanner { display: grid; gap: 2px; text-decoration: none; color: inherit; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: 14px; padding: 14px 16px; margin: 8px 0 14px; }
 .revbanner b { font-family: var(--display); font-weight: 400; font-size: 22px; }
 .badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 700; }
+
+/* Microfone */
+.mic { display: inline-flex; align-items: center; gap: 6px; height: 40px; min-width: 40px; padding: 0 10px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 14px; }
+.mic svg { width: 18px; height: 18px; }
+.mic:hover { border-color: var(--accent); color: var(--accent); }
+.mic.rec { background: var(--accent); border-color: var(--accent); color: #fff; animation: micpulse 1.1s ease-in-out infinite; }
+.mic.busy { opacity: .6; pointer-events: none; }
+@keyframes micpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(179,38,62,.45); } 50% { box-shadow: 0 0 0 8px rgba(179,38,62,0); } }
+@media (prefers-reduced-motion: reduce) { .mic.rec { animation: none; } }
+#micbox { position: fixed; left: 50%; top: 14px; transform: translate(-50%, -140%); width: min(92vw, 460px); z-index: 60; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; box-shadow: 0 10px 30px rgba(0,0,0,.14); font-size: 14px; transition: transform .25s ease; }
+#micbox.show { transform: translate(-50%, 0); }
+#micbox .bar-actions { margin-top: 10px; }
+.micres { display: grid; gap: 2px; margin-top: 10px; padding: 10px 12px; border-radius: 12px; text-align: center; font-size: 14px; }
+.micres.ok { background: var(--good-soft); color: var(--good); }
+.micres.close { background: var(--surface); color: var(--amber); border: 1px solid var(--amber); }
+.micres.bad { background: var(--accent-soft); color: var(--bad); }
+.micres span { color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -652,7 +669,10 @@ function audioHelpHTML() {
     <li>Depois de instalar, feche e abra a página de novo.</li>
   </ol>
   <p>Velocidade: <span class="rate">${[0.7, 0.85, 1].map(r => `<button type="button" data-act="rate" data-r="${r}" aria-pressed="${Math.abs(audio.rate - r) < .06}">${r === 0.7 ? 'Bem devagar' : r === 0.85 ? 'Devagar' : 'Normal'}</button>`).join('')}</span>
-  <button class="btn ghost sm" type="button" data-say="Dzień dobry! Jak się masz?">Testar: „Dzień dobry! Jak się masz?”</button></p></div>`;
+  <button class="btn ghost sm" type="button" data-say="Dzień dobry! Jak się masz?">Testar: „Dzień dobry! Jak się masz?”</button></p>
+  <h4>Microfone</h4>
+  <p>Para ouvir você, o app usa o <b>Whisper</b>, que roda no próprio aparelho (baixa cerca de 80 MB na primeira vez). Se ele não carregar, usa o reconhecimento de voz do sistema, quando existe.</p>
+  <p><span class="rate"><button type="button" data-act="vpref" data-v="whisper" aria-pressed="${voice.pref !== 'system'}">Whisper</button><button type="button" data-act="vpref" data-v="system" aria-pressed="${voice.pref === 'system'}" ${voice.sysSR() ? '' : 'disabled'}>Voz do sistema</button></span></p></div>`;
 }
 
 /* ---------- IA ---------- */
@@ -1084,7 +1104,7 @@ function practiceHTML(ch, id) {
   return `${bar}<div class="q pst"><div class="prompt">${TASK_LABEL[t.k]}</div>${body}${st ? feedbackHTML(t, st) : ''}</div>`;
 }
 function inputHTML(st, wide) {
-  return `${keysHTML()}<div class="bar-actions"><input class="pinput ${st ? st.res : ''} ${wide ? 'wide' : ''}" id="pinput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" lang="pl" value="${st ? esc(st.v) : ''}" ${st ? 'disabled' : ''} aria-label="Sua resposta">${st ? '' : '<button class="btn sm" type="button" data-act="pscheck">Verificar</button>'}</div>`;
+  return `${keysHTML()}<div class="bar-actions"><input class="pinput ${st ? st.res : ''} ${wide ? 'wide' : ''}" id="pinput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" lang="pl" value="${st ? esc(st.v) : ''}" ${st ? 'disabled' : ''} aria-label="Sua resposta">${st ? '' : micBtn('pinput') + '<button class="btn sm" type="button" data-act="pscheck">Verificar</button>'}</div>`;
 }
 function taskAnswer(t) {
   return t.k === 'type' ? t.ans[0] : t.k === 'fill' ? t.f[1] : t.k === 'dict' ? t.text : t.k === 'order' ? t.o[0] : t.ans;
@@ -1592,6 +1612,135 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Enter' && document.getElementById('psnext') && !e.target.matches('textarea, input')) { e.preventDefault(); document.getElementById('psnext').click(); }
 });
 
+/* ---------- Voz: Whisper no aparelho (com reserva no reconhecimento do sistema) ---------- */
+const WHISPER_MODEL = 'Xenova/whisper-base';
+const WHISPER_LIB = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3';
+const voice = {
+  pipe: null, loading: null, pct: 0, failed: false, rec: null, chunks: [], busy: false, timer: null, target: null,
+  pref: (() => { try { return localStorage.getItem('polski-voice') || ''; } catch (e) { return ''; } })(),
+  setPref(v) { this.pref = v; try { localStorage.setItem('polski-voice', v); } catch (e) {} },
+  canRecord() { return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); },
+  sysSR() { return window.SpeechRecognition || window.webkitSpeechRecognition || null; },
+  available() { return this.canRecord() || !!this.sysSR(); },
+  async loadWhisper() {
+    if (this.pipe) return this.pipe;
+    if (this.loading) return this.loading;
+    this.loading = (async () => {
+      const T = await import(WHISPER_LIB);
+      T.env.allowLocalModels = false;
+      const files = {};
+      const device = navigator.gpu ? 'webgpu' : 'wasm';
+      const opts = { device, progress_callback: p => {
+        if (p.status === 'progress' && p.total) { files[p.file] = [p.loaded, p.total]; const v = Object.values(files); this.pct = Math.round(v.reduce((a, x) => a + x[0], 0) / v.reduce((a, x) => a + x[1], 0) * 100); micBox(`Baixando o reconhecimento de voz… <b class="num">${this.pct}%</b><br><span class="meta">Só na primeira vez. Depois fica guardado no aparelho.</span>`); }
+      } };
+      if (device === 'wasm') opts.dtype = 'q8';
+      try { this.pipe = await T.pipeline('automatic-speech-recognition', WHISPER_MODEL, opts); }
+      catch (e) { if (device !== 'wasm') { opts.device = 'wasm'; opts.dtype = 'q8'; this.pipe = await T.pipeline('automatic-speech-recognition', WHISPER_MODEL, opts); } else throw e; }
+      micBox('Reconhecimento de voz pronto.', 1800);
+      return this.pipe;
+    })().catch(e => { this.failed = true; this.loading = null; throw e; });
+    return this.loading;
+  },
+  async start(target) {
+    if (this.busy) return;
+    if (this.rec) { this.stop(); return; }
+    this.target = target;
+    const useWhisper = this.pref !== 'system' && this.canRecord() && !this.failed;
+    if (useWhisper && !this.pipe && this.pref !== 'whisper') {
+      micBox(`Para ouvir você, o app usa o <b>Whisper</b>, que roda no próprio aparelho. Ele baixa cerca de <b>80 MB</b> uma vez só; prefira o Wi-Fi.
+        <div class="bar-actions"><button class="btn accent sm" type="button" data-act="vwhisper">Baixar e usar</button>${this.sysSR() ? '<button class="btn ghost sm" type="button" data-act="vsystem">Usar a voz do sistema</button>' : ''}<button class="btn ghost sm" type="button" data-act="vclose">Agora não</button></div>`);
+      return;
+    }
+    if (useWhisper) {
+      if (!this.pipe) { try { micBox('Preparando o reconhecimento de voz…'); await this.loadWhisper(); } catch (e) { return this.fallback(target, 'Não consegui carregar o Whisper aqui.'); } }
+      return this.recordWhisper(target);
+    }
+    return this.recordSystem(target);
+  },
+  fallback(target, why) {
+    if (this.sysSR()) { micBox(why + ' Vou usar o reconhecimento de voz do sistema.', 2500); return this.recordSystem(target); }
+    micBox(why + ' Esta tela não tem outro reconhecimento de voz disponível.', 4000);
+  },
+  async recordWhisper(target) {
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } }); }
+    catch (e) { micBox('Sem acesso ao microfone. Permita o microfone nas configurações do app ou do navegador.', 4500); return; }
+    this.chunks = [];
+    const rec = new MediaRecorder(stream);
+    rec.ondataavailable = e => { if (e.data.size) this.chunks.push(e.data); };
+    rec.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      this.rec = null; clearTimeout(this.timer); micState('busy');
+      this.busy = true;
+      try {
+        const blob = new Blob(this.chunks, { type: rec.mimeType || 'audio/webm' });
+        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+        const buf = await ctx.decodeAudioData(await blob.arrayBuffer()); ctx.close();
+        const out = await this.pipe(buf.getChannelData(0), { language: 'polish', task: 'transcribe' });
+        voiceResult(target, (out && out.text || '').trim());
+      } catch (e) { micBox('Não consegui entender o áudio. Tente de novo, mais perto do microfone.', 3500); }
+      this.busy = false; micState('');
+    };
+    this.rec = rec; rec.start(); micState('rec');
+    micBox('Ouvindo… toque no microfone de novo quando terminar.', 0);
+    this.timer = setTimeout(() => this.stop(), 8000);
+  },
+  recordSystem(target) {
+    const SR = this.sysSR(); if (!SR) { micBox('Reconhecimento de voz indisponível nesta tela.', 3000); return; }
+    const r = new SR(); r.lang = 'pl-PL'; r.interimResults = false; r.maxAlternatives = 3;
+    r.onresult = e => { const alts = [...e.results[0]].map(a => a.transcript); voiceResult(target, alts[0] || '', alts); };
+    r.onerror = e => { micBox(e.error === 'not-allowed' ? 'Sem acesso ao microfone. Permita o microfone nas configurações.' : 'Não ouvi nada. Tente de novo.', 3000); };
+    r.onend = () => { this.rec = null; micState(''); };
+    this.rec = { stop: () => r.stop() }; r.start(); micState('rec');
+    micBox('Ouvindo…', 0);
+  },
+  stop() { if (this.rec) { try { this.rec.stop(); } catch (e) {} } },
+};
+function micBox(html, ms) {
+  let el = document.getElementById('micbox');
+  if (!el) { el = document.createElement('div'); el.id = 'micbox'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+  if (!html) { el.classList.remove('show'); return; }
+  el.innerHTML = html; el.classList.add('show');
+  clearTimeout(micBox.t); if (ms) micBox.t = setTimeout(() => el.classList.remove('show'), ms);
+}
+function micState(s) { document.querySelectorAll('.mic').forEach(b => { b.classList.toggle('rec', s === 'rec'); b.classList.toggle('busy', s === 'busy'); }); if (!s && voice.rec === null && !voice.busy) { const el = document.getElementById('micbox'); if (el && /Ouvindo/.test(el.textContent)) micBox(''); } }
+const MIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>';
+const micBtn = (target, label) => voice.available() ? `<button class="mic" type="button" data-act="mic" data-target="${esc(target)}" aria-label="${esc(label || 'Falar')}">${MIC}${label ? `<span>${esc(label)}</span>` : ''}</button>` : '';
+/* Parecido: 0 a 1, ignorando acentos e pontuação */
+function similarity(a, b) {
+  a = strip(norm(a)); b = strip(norm(b)); if (!a || !b) return 0; if (a === b) return 1;
+  const m = a.length, n = b.length, d = Array.from({ length: m + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) for (let j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return 1 - d[m][n] / Math.max(m, n);
+}
+function voiceResult(target, text, alts) {
+  micBox('');
+  if (!text) { micBox('Não ouvi nada. Tente de novo.', 2500); return; }
+  const clean = text.replace(/^[\s"„“”'.,!?]+|[\s"„“”'.,!?]+$/g, '');
+  if (target === 'linput' || target === 'pinput') {
+    const el = document.getElementById(target); if (!el || el.disabled) return;
+    el.value = clean; el.dispatchEvent(new Event('input', { bubbles: true })); el.focus();
+    micBox(`Ouvi: „${esc(clean)}”. Confira e toque em Verificar.`, 3000); return;
+  }
+  /* Repetir em voz alta: compara com a frase alvo */
+  const want = target.replace(/^say:/, '');
+  const score = Math.max(...[clean, ...(alts || [])].map(t => similarity(t, want)));
+  const box = document.getElementById('micres');
+  const verdict = score >= 0.85 ? ['ok', 'Muito bem! Deu para entender perfeitamente.'] : score >= 0.6 ? ['close', 'Quase. Ouça de novo e repita devagar.'] : ['bad', 'Ainda não. Ouça o áudio e tente outra vez.'];
+  if (box) box.innerHTML = `<div class="micres ${verdict[0]}"><b>${verdict[1]}</b><span>Ouvi: „${esc(clean)}”</span></div>`;
+  store.log(); store.save();
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act;
+  if (a === 'mic') { audio.stop(); voice.start(b.dataset.target); }
+  else if (a === 'vwhisper') { voice.setPref('whisper'); micBox('Preparando…'); voice.loadWhisper().then(() => micBox('Pronto! Toque no microfone para falar.', 2500)).catch(() => voice.fallback(voice.target, 'Não consegui baixar o Whisper aqui.')); }
+  else if (a === 'vsystem') { voice.setPref('system'); micBox(''); voice.recordSystem(voice.target); }
+  else if (a === 'vclose') micBox('');
+});
+document.addEventListener('click', e => { const b = e.target.closest('[data-act="vpref"]'); if (b) { voice.setPref(b.dataset.v); render(); } });
+
 /* ---------- Lição guiada (passo a passo) e Revisão espaçada ---------- */
 const SRS_INT = [0, 1, 2, 4, 7, 15, 30, 60];
 const dayPlus = n => { const d = new Date(); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
@@ -1673,7 +1822,8 @@ function runnerHTML(R) {
   const choice = (opts, ans, pl) => `<div class="opts one">${opts.map((o, j) => `<button type="button" data-act="lspick" data-o="${j}" ${st ? 'disabled' : ''} ${pl ? 'lang="pl"' : ''} class="${st && o === ans ? 'right' : ''} ${st && st.pick === o && o !== ans ? 'wrong' : ''}">${esc(o)}</button>`).join('')}</div>`;
   let body = '', cont = false;
   if (t.k === 'intro') { cont = true; body = `<div class="lsword" lang="pl">${esc(t.w.pl)}</div><div class="bar-actions" style="justify-content:center">${sayBtn(firstForm(t.w.pl), 'a palavra')}<button class="btn ghost sm" type="button" data-act="slow" data-t="${esc(firstForm(t.w.pl))}">devagar</button></div>
-      <div class="lstr">${esc(t.w.pt)}</div>${t.w.note ? `<div class="meta">${esc(t.w.note)}</div>` : ''}${exampleBlock(t.w.ex)}<p class="meta">Ouça e repita em voz alta.</p>`; }
+      <div class="lstr">${esc(t.w.pt)}</div>${t.w.note ? `<div class="meta">${esc(t.w.note)}</div>` : ''}${exampleBlock(t.w.ex)}
+      <div class="bar-actions" style="justify-content:center;margin-top:12px">${micBtn('say:' + firstForm(t.w.pl), 'Repetir em voz alta') || '<p class="meta">Ouça e repita em voz alta.</p>'}</div><div id="micres"></div>`; }
   else if (t.k === 'tip') { cont = true; body = `<div class="gram lstip"><h4>${esc(t.g.t)}</h4>${t.g.h.replace(/<table>/g, '<div class="tblwrap"><table>').replace(/<\/table>/g, '</table></div>')}</div>`; }
   else if (t.k === 'mean') body = `<div class="lsword sm" lang="pl">${esc(t.w.pl)} ${sayBtn(firstForm(t.w.pl), '', true)}</div>${choice(t.opts, t.ans)}`;
   else if (t.k === 'say') body = `<div class="lsword sm">${esc(t.w.pt)}</div>${choice(t.opts, t.ans, true)}`;
@@ -1688,7 +1838,7 @@ function runnerHTML(R) {
       <div class="tokens">${t.pool.map((x, j) => `<button type="button" data-act="lstok" data-j="${j}" ${st ? 'disabled' : ''} lang="pl">${esc(x.t)}</button>`).join('')}</div>
       ${!t.pool.length && !st ? `<button class="btn sm" type="button" data-act="lscheck">Verificar</button>` : ''}`;
   else if (t.k === 'type') body = `<div class="lsword sm">${esc(t.w.pt)}</div>${t.w.ex ? `<div class="hint">Exemplo: ${esc(t.w.ex[1])}</div>` : ''}${keysHTML()}
-      <div class="bar-actions"><input class="pinput ${st ? st.res : ''}" id="linput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" lang="pl" value="${st ? esc(st.v) : ''}" ${st ? 'disabled' : ''} aria-label="Sua resposta">${st ? '' : '<button class="btn sm" type="button" data-act="lscheck">Verificar</button>'}</div>`;
+      <div class="bar-actions"><input class="pinput ${st ? st.res : ''}" id="linput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" lang="pl" value="${st ? esc(st.v) : ''}" ${st ? 'disabled' : ''} aria-label="Sua resposta">${st ? '' : micBtn('linput') + '<button class="btn sm" type="button" data-act="lscheck">Verificar</button>'}</div>`;
   const again = R.again.has(R.i) ? '<span class="lsagain">de novo</span>' : '';
   return `${bar}<div class="lscard"><div class="prompt">${LS_LABEL[t.k]} ${again}</div>${body}</div>
     ${cont ? `<div class="lsfoot"><button class="btn accent" type="button" data-act="lsnext" id="lsnext">Continuar →</button></div>` : st ? lsFeedback(t, st) : ''}`;

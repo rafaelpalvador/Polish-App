@@ -12,6 +12,8 @@ Cada capítulo começa com **lições guiadas**, uma tela por vez como no Babbel
 
 A **revisão espaçada** (aba Revisão) traz de volta cada palavra aprendida em 1, 2, 4, 7, 15, 30 e 60 dias; se errar, ela volta no dia seguinte.
 
+O **microfone** usa o [Whisper](https://huggingface.co/Xenova/whisper-base) rodando no próprio aparelho (via Transformers.js; cerca de 80 MB baixados na primeira vez, depois ficam em cache). Serve para repetir as palavras novas em voz alta e receber um retorno, e para ditar respostas em vez de digitar. Se o Whisper não carregar, o app usa o reconhecimento de voz do sistema, quando existe.
+
 Depois, cada capítulo tem 5 etapas: Palavras (cartões, ligar e completar), Gramática (com teste rápido), Diálogo (com modo de fazer um papel), Prática e Redação.
 
 ## Como rodar
@@ -29,6 +31,7 @@ Fora do Claude, o app funciona assim:
 index.html            app completo (CSS e script inline)
 build/app.js          cópia do script inline, para leitura
 build/guided.js       lição guiada e revisão espaçada (já incluído no index.html)
+build/voice.js        microfone com Whisper (já incluído no index.html)
 build/extra.css       estilos extras
 data/a1-*.js          capítulos do A1
 data/ex-a1-*.js       exemplos e testes do A1
