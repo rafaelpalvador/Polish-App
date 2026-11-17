@@ -1,0 +1,43 @@
+/* Paradas do B1: uma depois de cada par de capítulos. Fatos checados em 11/2026. */
+COURSE.stops('b1', [
+  { after: 2, place: 'Kraków', region: 'Małopolska',
+    title: 'A Dama com Arminho, o único Leonardo da Polônia',
+    facts: [
+      'O retrato de Cecilia Gallerani, pintado por Leonardo da Vinci por volta de 1490, é a única obra dele em coleções polonesas.',
+      'O príncipe Adam Jerzy Czartoryski comprou o quadro por volta de 1800, provavelmente na Itália, como presente para a mãe, Izabela.',
+      'Durante a Segunda Guerra foi levado pelos nazistas e, no fim da guerra, encontrado pelos americanos.',
+      'Em dezembro de 2016, o Estado polonês comprou toda a coleção Czartoryski. Hoje a Dama está no Museu Czartoryski, em Cracóvia.',
+    ],
+    words: [['obraz', 'quadro'], ['gronostaj', 'arminho'], ['kolekcja', 'coleção'], ['arcydzieło', 'obra-prima'], ['muzeum', 'museu']],
+    src: [['Dama z gronostajem · dzieje.pl', 'https://dzieje.pl/node/6360'], ['Dama wraca do Muzeum Czartoryskich · dzieje.pl', 'https://dzieje.pl/node/111524'], ['Muzeum Książąt Czartoryskich · Radio Kraków', 'https://radiokrakow.pl/kultura/dama-z-gronostajem-juz-w-muzeum-czartoryskich']] },
+  { after: 4, place: 'Gdańsk', region: 'Pomorze (Pomerânia)',
+    title: 'O estaleiro onde nasceu o Solidariedade',
+    facts: [
+      'Em 14 de agosto de 1980, começou uma greve no Estaleiro de Gdańsk, que logo se espalhou por quase todo o litoral.',
+      'O líder era Lech Wałęsa, eletricista que tinha sido demitido do estaleiro alguns anos antes.',
+      'O comitê de greve publicou 21 reivindicações; a principal era o direito a sindicatos livres.',
+      'Em 31 de agosto de 1980 foram assinados os Acordos de Gdańsk. Em setembro nasceu o sindicato independente "Solidarność", com Wałęsa à frente.',
+    ],
+    words: [['stocznia', 'estaleiro'], ['strajk', 'greve'], ['robotnik', 'operário'], ['związek zawodowy', 'sindicato'], ['postulat', 'reivindicação']],
+    src: [['40 lat temu w Stoczni Gdańskiej · dzieje.pl', 'https://dzieje.pl/wiadomosci/40-lat-temu-w-stoczni-gdanskiej-rozpoczal-sie-strajk'], ['Porozumienia sierpniowe · ZPE', 'https://zpe.gov.pl/a/D1CcF3Je3'], ['Rewolucja Solidarności · ECS', 'https://ecs.gda.pl/wp-content/uploads/2025/08/289x380_ECS_GAZETA_SIERPIEN_2025_WEB.pdf']] },
+  { after: 6, place: 'Wrocław', region: 'Dolny Śląsk (Baixa Silésia)',
+    title: 'A cidade dos anõezinhos',
+    facts: [
+      'Nos anos 1980, o movimento estudantil "Alternativa Laranja" pintava anões nos muros para zombar do regime comunista com humor e absurdo.',
+      'Em 1988, num dos maiores happenings do grupo, milhares de pessoas desfilaram pela rua Świdnicka com gorros de anão.',
+      'A primeira estátua, o "Papa Krasnal", foi colocada em 2001 na esquina das ruas Świdnicka e Kazimierza Wielkiego.',
+      'A partir de 2005 a prefeitura encomendou novas estátuas. Hoje são centenas, e caçar anões virou passeio turístico.',
+    ],
+    words: [['krasnal', 'anão (estátua)'], ['krasnoludek', 'anãozinho'], ['pomarańczowy', 'laranja (cor)'], ['brąz', 'bronze'], ['szukać', 'procurar']],
+    src: [['36 lat temu ulicami Wrocławia przemaszerowało 10 tysięcy krasnoludków · wroclaw.pl', 'https://www.wroclaw.pl/dla-mieszkanca/36-lat-temu-ulicami-wroclawia-przemaszerowalo-10-tysiecy-krasnoludkow'], ['Hunting for Krasnale · Visit Wrocław', 'https://visitwroclaw.eu/en/take-over-wro-hunting-for-krasnale'], ['Papa Krasnal · Muzeum Miejskie Wrocławia', 'https://artsandculture.google.com/asset/papa-krasnal-0000/JAEcQH8J0_zzOw']] },
+  { after: 8, place: 'Puszcza Białowieska', region: 'Podlasie',
+    title: 'A floresta dos bisões',
+    facts: [
+      'É uma das últimas florestas primárias da Europa, dividida entre a Polônia e Belarus.',
+      'A parte polonesa entrou na lista do Patrimônio Mundial da UNESCO em 1979, entre os primeiros sítios do mundo.',
+      'O último bisão selvagem da floresta morreu em 1919. Os bisões voltaram a partir de animais criados em cativeiro.',
+      'Os primeiros foram soltos em 1952. Hoje vive ali a maior população livre de bisão-europeu do mundo.',
+    ],
+    words: [['żubr', 'bisão-europeu'], ['puszcza', 'floresta antiga'], ['park narodowy', 'parque nacional'], ['rezerwat', 'reserva'], ['przyroda', 'natureza']],
+    src: [['Żubry z Białowieży · National Geographic', 'https://www.national-geographic.pl/nauka/zubry-z-bialowiezy/'], ['Żubry w Białowieskim Parku Narodowym · dzieje.pl', 'https://dzieje.pl/node/24195'], ['Puszcza Białowieska – obiekt UNESCO · gov.pl', 'https://www.gov.pl/attachment/5b05f513-3a3c-4092-9e10-c46925194500']] },
+]);
