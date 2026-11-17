@@ -8,7 +8,11 @@ Curso de polonês sem pressa, para quem fala português do Brasil. Segue os tema
 - **A2:** 12 capítulos (2 para cada capítulo do Busuu) e 6 paradas.
 - **Bancos de vocabulário** do A1 ao B2.
 
-Cada capítulo tem 5 etapas: Palavras (cartões, ligar e completar), Gramática (com teste rápido), Diálogo (com modo de fazer um papel), Prática e Redação.
+Cada capítulo começa com **lições guiadas**, uma tela por vez como no Babbel: palavra nova com áudio, teste logo em seguida, pares, escuta, exemplo para completar, dica de gramática, trecho do diálogo e frase para montar. Erros voltam no fim da lição.
+
+A **revisão espaçada** (aba Revisão) traz de volta cada palavra aprendida em 1, 2, 4, 7, 15, 30 e 60 dias; se errar, ela volta no dia seguinte.
+
+Depois, cada capítulo tem 5 etapas: Palavras (cartões, ligar e completar), Gramática (com teste rápido), Diálogo (com modo de fazer um papel), Prática e Redação.
 
 ## Como rodar
 
@@ -24,6 +28,7 @@ Fora do Claude, o app funciona assim:
 ```
 index.html            app completo (CSS e script inline)
 build/app.js          cópia do script inline, para leitura
+build/guided.js       lição guiada e revisão espaçada (já incluído no index.html)
 build/extra.css       estilos extras
 data/a1-*.js          capítulos do A1
 data/ex-a1-*.js       exemplos e testes do A1

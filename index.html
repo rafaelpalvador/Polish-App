@@ -409,6 +409,41 @@ mark { background: var(--accent-soft); color: var(--accent); border-radius: 4px;
 .pinput:focus { outline: none; border-color: var(--accent); }
 .pinput.right { border-color: var(--good); color: var(--good); } .pinput.close { border-color: var(--amber); color: var(--amber); } .pinput.wrong { border-color: var(--bad); color: var(--bad); }
 .resetbox { margin-top: 30px; padding-top: 16px; border-top: 1px solid var(--line); }
+
+/* Lição guiada e revisão */
+.lessons { display: grid; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 16px; padding: 18px; margin: 18px 0 8px; }
+.lessons h3 { font-family: var(--display); font-weight: 400; font-size: 26px; margin: 2px 0 4px; }
+.lessons .btn { justify-self: start; }
+.lchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lchips button { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); font-size: 13px; font-variant-numeric: tabular-nums; }
+.lchips button.done { background: var(--good-soft); border-color: var(--good); color: var(--good); }
+.lchips button.next { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.lsmain { max-width: 620px; margin: 0 auto; padding-bottom: 150px; }
+.lsctx { margin: 6px 0 10px; }
+.lsbar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.lsbar .track { flex: 1; height: 10px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.lsbar .track i { display: block; height: 100%; background: var(--good); transition: width .35s ease; }
+.lsx { font-size: 20px; color: var(--muted); text-decoration: none; line-height: 1; padding: 4px; }
+.lscard { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; padding: 22px 18px; }
+.lscard .prompt { font-weight: 600; margin-bottom: 14px; font-size: 15px; }
+.lsagain { font-size: 11px; font-weight: 600; color: var(--amber); border: 1px solid var(--amber); border-radius: 99px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+.lsword { font-family: var(--display); font-size: clamp(36px, 9vw, 56px); line-height: 1.05; text-align: center; margin: 6px 0 12px; }
+.lsword.sm { font-size: clamp(26px, 7vw, 38px); }
+.lstr { text-align: center; font-size: 20px; margin: 10px 0 6px; }
+.lscard .meta { text-align: center; }
+.lstip { border: 0; padding: 0; margin: 0; background: none; }
+.lsdlg { background: var(--bg); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+.lsdlg .who { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.lsfoot { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; gap: 14px; align-items: center; justify-content: space-between; padding: 14px max(16px, calc(50% - 300px)); background: var(--surface); border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgba(0,0,0,.06); }
+.lsfoot.ok { background: var(--good-soft); border-color: var(--good); }
+.lsfoot.bad { background: var(--accent-soft); border-color: var(--accent); }
+.lsfoot .lsmsg { font-size: 15px; flex: 1; }
+.lsfoot.ok .lsmsg { color: var(--good); } .lsfoot.bad .lsmsg { color: var(--bad); }
+.lsfoot .lsmsg .meta, .lsfoot .example { color: var(--ink); text-align: left; }
+.lsfoot:not(.ok):not(.bad) { justify-content: flex-end; }
+.revbanner { display: grid; gap: 2px; text-decoration: none; color: inherit; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: 14px; padding: 14px 16px; margin: 8px 0 14px; }
+.revbanner b { font-family: var(--display); font-weight: 400; font-size: 22px; }
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -491,7 +526,7 @@ const speakable = s => String(s).replace(/\(.*?\)/g, '').replace(/…/g, '').rep
 const sayBtn = (text, label, mini) => `<button class="say${mini ? ' mini' : ''}" type="button" data-say="${esc(speakable(text))}" aria-label="Ouvir ${esc(label || text)}">${SPK}</button>`;
 
 /* ---------- Progresso: db por pessoa, com cópia local ---------- */
-const blank = () => ({ p: {}, last: null, known: {}, days: {}, stops: {}, grades: [] });
+const blank = () => ({ p: {}, last: null, known: {}, days: {}, stops: {}, grades: [], srs: {} });
 const store = {
   db: null, uid: null, data: blank(), essays: {},
   key: 'polski-progress-v1',
@@ -525,7 +560,7 @@ const store = {
   log(n = 1) { const d = today(); this.data.days[d] = (this.data.days[d] || 0) + n; },
   mark(id, step, val = true) { this.get(id)[step] = val; this.data.last = id; this.log(); this.save(); },
   box(key) { return this.data.known[key] || 0; },
-  setBox(key, v) { if (v <= 0) delete this.data.known[key]; else this.data.known[key] = Math.min(5, v); this.log(); this.save(); },
+  setBox(key, v) { if (v <= 0) delete this.data.known[key]; else { this.data.known[key] = Math.min(5, v); srsSeed(key); } this.log(); this.save(); },
   async loadEssay(id) {
     if (this.essays[id]) return this.essays[id];
     let e = { attempts: [], draft: '' };
@@ -557,6 +592,7 @@ function mergeProgress(a, b) {
   for (const k of new Set([...Object.keys(a.known), ...Object.keys(b.known)])) out.known[k] = Math.max(a.known[k] || 0, b.known[k] || 0);
   for (const k of new Set([...Object.keys(a.days), ...Object.keys(b.days)])) out.days[k] = Math.max(a.days[k] || 0, b.days[k] || 0);
   out.stops = Object.assign({}, a.stops, b.stops);
+  for (const k of new Set([...Object.keys(a.srs), ...Object.keys(b.srs)])) { const x = a.srs[k], y = b.srs[k]; out.srs[k] = !x ? y : !y ? x : (x.d > y.d || (x.d === y.d && x.b >= y.b) ? x : y); }
   const seen = new Set(); out.grades = [...a.grades, ...b.grades].filter(g => { const k = g.id + g.at; if (seen.has(k)) return false; seen.add(k); return true; }).sort((p, q) => p.at < q.at ? -1 : 1);
   return out;
 }
@@ -644,13 +680,14 @@ let view = { name: 'home', lvl: 'a1' };
 let ui = { lvl: 'a1', hideTr: false, hidePt: false, flash: null, vmode: 'learn', learn: null, gc: null, dmode: 'read', rp: null, ps: null, bankQ: '', bankF: 'all', open: {}, showHelp: false, resetAsk: false, bex: {} };
 function parseHash() {
   const h = location.hash.replace('#', '');
-  let m = h.match(/^(a1|a2|b1|b2)-(\d+)(?:-(vocab|gramatica|dialogo|pratica|redacao))?$/);
+  let m = h.match(/^(a1|a2|b1|b2)-(\d+)(?:-(vocab|gramatica|dialogo|pratica|redacao|licao))?$/);
   if (m && findCh(m[1], +m[2])) return { name: 'ch', lvl: m[1], n: +m[2], tab: m[3] || 'vocab' };
   m = h.match(/^(a1|a2|b1|b2)-parada-(\d+)$/);
   if (m && stopAfter(m[1], +m[2])) return { name: 'stop', lvl: m[1], n: +m[2] };
   m = h.match(/^vocabulario(?:-(a1|a2|b1|b2))?$/);
   if (m) return { name: 'bank', lvl: m[1] || ui.lvl };
   if (h === 'progresso') return { name: 'stats', lvl: ui.lvl };
+  if (h === 'revisao') return { name: 'review', lvl: ui.lvl };
   m = h.match(/^nivel-(a1|a2|b1|b2)$/);
   if (m) return { name: 'home', lvl: m[1] };
   return { name: 'home', lvl: ui.lvl };
@@ -662,6 +699,8 @@ function route() {
   if (view.name === 'ch' && (prev.name !== 'ch' || prev.n !== view.n || prev.lvl !== view.lvl)) { ui.flash = null; ui.learn = null; ui.gc = null; ui.rp = null; ui.ps = null; ui.result = null; }
   if (view.name === 'ch' && prev.name === 'ch' && prev.tab !== view.tab) { ui.flash = null; }
   if (view.name !== prev.name) ui.flash = null;
+  if (!(view.name === 'ch' && view.tab === 'licao') && view.name !== 'review') ui.ls = null;
+  if (view.name === 'review' && prev.name !== 'review') ui.ls = null;
   audio.stop();
   render();
   if (prev.name !== view.name || prev.n !== view.n || prev.lvl !== view.lvl) window.scrollTo(0, 0);
@@ -675,21 +714,24 @@ function render() {
   else if (view.name === 'stop') renderStop();
   else if (view.name === 'bank') renderBank();
   else if (view.name === 'stats') renderStats();
+  else if (view.name === 'review') renderReview();
   else renderHome();
   audio.update();
 }
 function renderNav() {
-  const lvlNav = view.name === 'stats' ? '' : COURSE.meta.map(m => {
+  const lvlNav = view.name === 'stats' || view.name === 'review' ? '' : COURSE.meta.map(m => {
     const has = level(m.id).length || bankGroups(m.id).length;
     const target = view.name === 'bank' ? 'vocabulario-' + m.id : 'nivel-' + m.id;
     return `<button type="button" data-act="level" data-go="${target}" aria-pressed="${ui.lvl === m.id}" ${has ? '' : 'disabled'}>${m.name}${level(m.id).length || view.name === 'bank' ? '' : '<small>vocab.</small>'}</button>`;
   }).join('');
   document.getElementById('levels').innerHTML = lvlNav;
   document.getElementById('levels').style.display = lvlNav ? '' : 'none';
-  const cur = view.name === 'bank' ? 'bank' : view.name === 'stats' ? 'stats' : 'course';
+  const cur = view.name === 'bank' ? 'bank' : view.name === 'stats' ? 'stats' : view.name === 'review' ? 'review' : 'course';
+  const due = srsDueKeys().length;
   document.getElementById('mainnav').innerHTML = `
     <a href="#nivel-${ui.lvl}" ${cur === 'course' ? 'aria-current="page"' : ''}>Curso</a>
     <a href="#vocabulario-${ui.lvl}" ${cur === 'bank' ? 'aria-current="page"' : ''}>Vocabulário</a>
+    <a href="#revisao" ${cur === 'review' ? 'aria-current="page"' : ''}>Revisão${due ? ` <span class="badge">${due}</span>` : ''}</a>
     <a href="#progresso" ${cur === 'stats' ? 'aria-current="page"' : ''}>Progresso</a>
     <span class="spacer"></span>
     <button class="audiochip" id="audiochip" type="button" data-act="audiohelp"></button>`;
@@ -717,13 +759,13 @@ function renderHome() {
   const pct = Math.round(steps / (chs.length * STEPS.length) * 100);
   const nx = nextChapter(ui.lvl);
   const started = steps > 0;
-  app.innerHTML = `${helpSlot()}
+  app.innerHTML = `${helpSlot()}${reviewBanner()}
   <section class="hero">
     <div>
       <div class="eyebrow">Nível ${esc(meta.name)} · ${esc(meta.title)} · ${chs.length} capítulos</div>
       <h1>${started ? 'Continue de onde <em>parou</em>' : 'Polonês sem <em>pressa</em>'}</h1>
       <p>${started ? `Próximo: capítulo ${nx.n}, <b>${esc(nx.pl)}</b> (${esc(nx.pt)}).` : 'Os temas do Busuu, com vocabulário completo, gramática explicada, diálogos com áudio, exercícios, uma redação corrigida pela IA no fim de cada capítulo e uma parada por uma cidade polonesa entre eles.'}</p>
-      <a class="btn accent" href="#${ui.lvl}-${nx.n}">${started ? 'Continuar' : 'Começar pelo capítulo 1'} →</a>
+      <a class="btn accent" href="#${ui.lvl}-${nx.n}${(store.get(chId(ui.lvl, nx.n)).vb || 0) < batchesOf(ui.lvl, nx).length ? '-licao' : ''}">${started ? 'Continuar' : 'Começar pelo capítulo 1'} →</a>
     </div>
     <div class="bigglyph" aria-hidden="true">${esc(nx.gl[0])}<small><b>${esc(nx.gl[1])}</b></small></div>
     <div class="meter"><div class="bar"><i style="width:${pct}%"></i></div><span class="num">${done}/${chs.length} capítulos · ${pct}%</span></div>
@@ -762,6 +804,7 @@ function renderStop() {
 function renderChapter() {
   const ch = findCh(view.lvl, view.n), id = chId(view.lvl, view.n), p = store.get(id);
   const tab = view.tab;
+  if (tab === 'licao') { renderLesson(); return; }
   if (store.data.last !== id) { store.data.last = id; store.save(); }
   const chs = level(view.lvl), idx = chs.indexOf(ch), st = stopAfter(view.lvl, ch.n);
   app.innerHTML = `${helpSlot()}
@@ -773,6 +816,8 @@ function renderChapter() {
   </section>
   <ul class="goals">${ch.goals.map(g => `<li>${esc(g)}</li>`).join('')}</ul>
   <details class="busuu"><summary>Lições correspondentes no Busuu</summary><ol>${ch.busuu.map(b => `<li>${esc(b)}</li>`).join('')}</ol></details>
+  ${lessonsCard(ch, id)}
+  <div class="section-h"><h2>Estudo por etapas</h2></div>
   <nav class="tabs" role="tablist">${STEPS.map((s, i) => `<button type="button" role="tab" data-act="tab" data-tab="${s.id}" aria-selected="${tab === s.id}" class="${stepDone(p, s.id) ? 'ok' : ''}"><span class="n">${stepDone(p, s.id) ? '✓' : i + 1}</span>${s.label}</button>`).join('')}</nav>
   <section class="panel" id="panel"></section>
   ${st && (tab === 'redacao' || chDone(id)) ? stopHTML(view.lvl, st, false) : ''}
@@ -1315,6 +1360,8 @@ function renderStats() {
     ${slv.map(l => `<div class="tile"><b>${levelStats(l).done}<small style="font-size:18px;color:var(--muted)">/${level(l).length}</small></b><span>capítulos ${l.toUpperCase()} completos</span></div>`).join('')}
     <div class="tile"><b>${sess.length}</b><span>sessões de prática${sess.length ? ` · média ${pracAvg}%` : ''}</span></div>
     <div class="tile"><b>${grades.length}</b><span>redações corrigidas${grades.length ? ` · média ${avg.toFixed(1)}` : ''}</span></div>
+    <div class="tile"><b>${Object.keys(srs()).length}</b><span>palavras na revisão espaçada</span></div>
+    <div class="tile"><b>${srsDueKeys().length}</b><span>para revisar hoje</span></div>
     <div class="tile"><b>${streak()}</b><span>dias seguidos estudando</span></div>
     <div class="tile"><b>${activeDays}</b><span>dias com estudo no total</span></div>
     <div class="tile"><b>${stopsRead}<small style="font-size:18px;color:var(--muted)">/${allStops}</small></b><span>paradas visitadas</span></div>
@@ -1378,7 +1425,7 @@ function insertAt(el, txt) {
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 let lastField = null;
-document.addEventListener('focusin', e => { if (e.target.matches('#essay, #pinput, #askq')) lastField = e.target; });
+document.addEventListener('focusin', e => { if (e.target.matches('#essay, #pinput, #linput, #askq')) lastField = e.target; });
 document.addEventListener('mousedown', e => { if (e.target.closest('.keys button, .chips button')) e.preventDefault(); });
 
 let bankTimer = null;
@@ -1514,7 +1561,7 @@ document.addEventListener('click', async e => {
     case 'resetyes': await resetAll(); break;
     /* Banco: exemplos por IA */
     case 'bex': bankExamples(b.dataset.w, b.dataset.t, b.dataset.l, b); break;
-    case 'key': insertAt(lastField && document.body.contains(lastField) ? lastField : document.querySelector('#essay, #pinput'), b.dataset.k); break;
+    case 'key': insertAt(lastField && document.body.contains(lastField) ? lastField : document.querySelector('#essay, #pinput, #linput'), b.dataset.k); break;
     case 'ins': { const ta = document.getElementById('essay'); const v = ta.value; insertAt(ta, (v && !/\s$/.test(v.slice(0, ta.selectionStart)) ? ' ' : '') + b.dataset.k + ' '); audio.can() && audio.say(b.dataset.k); break; }
     case 'readmine': { const t = document.getElementById('essay').value.trim(); if (!t) { toast('Escreva algo primeiro.'); break; } audio.say(t.slice(0, 1900)); break; }
     case 'correct': doCorrect(ch, id); break;
@@ -1545,9 +1592,223 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Enter' && document.getElementById('psnext') && !e.target.matches('textarea, input')) { e.preventDefault(); document.getElementById('psnext').click(); }
 });
 
+/* ---------- Lição guiada (passo a passo) e Revisão espaçada ---------- */
+const SRS_INT = [0, 1, 2, 4, 7, 15, 30, 60];
+const dayPlus = n => { const d = new Date(); d.setDate(d.getDate() + n); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+let wordIdx = null;
+function wordIndex() {
+  if (wordIdx) return wordIdx;
+  wordIdx = new Map();
+  for (const m of COURSE.meta) {
+    for (const w of bankWords(m.id)) wordIdx.set(wkey(m.id, w.pl), { pl: w.pl, pt: w.pt, note: w.note, lvl: m.id, ex: null });
+    for (const c of level(m.id)) for (const w of chWords(m.id, c)) wordIdx.set(wkey(m.id, w.pl), { pl: w.pl, pt: w.pt, note: w.note, lvl: m.id, c: c.n, ex: w.ex });
+  }
+  return wordIdx;
+}
+const srs = () => store.data.srs || (store.data.srs = {});
+function srsSeed(key) { const s = srs(); if (!s[key] && wordIndex().has(key)) s[key] = { b: 1, d: dayPlus(1) }; }
+function srsGrade(key, ok) {
+  const s = srs(); const e = s[key] || (s[key] = { b: 0, d: today() });
+  if (ok) { e.b = Math.min(7, e.b + 1); e.d = dayPlus(SRS_INT[e.b]); } else { e.b = 1; e.d = dayPlus(1); }
+}
+function srsSync() { for (const k of Object.keys(store.data.known)) srsSeed(k); }
+const srsDueKeys = () => { const t = today(); return Object.keys(srs()).filter(k => srs()[k].d <= t && wordIndex().has(k)).sort((a, b) => srs()[a].d < srs()[b].d ? -1 : 1); };
+const srsCountOn = day => Object.values(srs()).filter(e => e.d === day).length;
+
+/* Itens: intro, tip, mean, say, listen, match, cloze, order, gcheck, dlg, type */
+function tokItem(text, pt) {
+  const toks = text.split(' '); let s = shuffle(toks);
+  for (let i = 0; i < 6 && s.join(' ') === text; i++) s = shuffle(toks);
+  return { k: 'order', text, pt, pool: s.map((t, i) => ({ t, i })), built: [] };
+}
+function choiceItem(k, w, pool) {
+  const field = k === 'mean' ? 'pt' : 'pl';
+  const show = x => field === 'pl' ? firstForm(x.pl) : x.pt;
+  const ans = show(w);
+  const others = shuffle(pool.filter(x => x.pl !== w.pl && show(x) !== ans).map(show));
+  return { k, w, ans, opts: shuffle([ans, ...[...new Set(others)].slice(0, 3)]) };
+}
+function buildLesson(lvl, ch, b) {
+  const batches = batchesOf(lvl, ch), words = batches[b], pool = chWords(lvl, ch), can = audio.can(), T = [];
+  words.forEach((w, i) => { T.push({ k: 'intro', w }); if (i > 0) T.push(choiceItem('mean', words[i - 1], pool)); });
+  T.push(choiceItem('mean', words[words.length - 1], pool));
+  T.push({ k: 'match', words, m: makeMatch(words) });
+  shuffle(words).slice(0, 2).forEach(w => T.push(choiceItem(can ? 'listen' : 'say', w, pool)));
+  makeCloze(shuffle(words).slice(0, 3), pool).forEach(q => T.push(Object.assign({ k: 'cloze' }, q)));
+  const g = ch.grammar[b % ch.grammar.length], checks = checksOf(lvl, ch.n);
+  if (g) T.push({ k: 'tip', g });
+  if (checks.length) T.push({ k: 'gcheck', c: checks[b % checks.length] });
+  const ow = shuffle(words.filter(w => w.ex && plainEx(w.ex[0]).split(' ').length <= 8))[0];
+  if (ow) T.push(Object.assign(tokItem(plainEx(ow.ex[0]), ow.ex[1]), { w: ow }));
+  const L = ch.dialogue.l;
+  if (L.length > 2) {
+    const j = (b * 3) % (L.length - 1), prev = L[j], line = L[j + 1];
+    const opts = shuffle([line[1], ...shuffle(L.filter(x => x[1] !== line[1] && x[1] !== prev[1]).map(x => x[1])).slice(0, 2)]);
+    T.push({ k: 'dlg', prev, line, opts, ans: line[1], title: ch.dialogue.t });
+  }
+  shuffle(words).slice(0, 2).forEach(w => T.push({ k: 'type', w, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) }));
+  return { mode: 'les', lvl, n: ch.n, b, items: T, i: 0, st: null, right: 0, graded: 0, again: new Set(), seen: new Set() };
+}
+function buildReview() {
+  const keys = srsDueKeys().slice(0, 20), idx = wordIndex(), T = [];
+  for (const k of keys) {
+    const w = idx.get(k), e = srs()[k]; if (!w) continue;
+    const pool = [...levelVocab(w.lvl).values()];
+    let kind = e.b <= 2 ? 'mean' : e.b <= 4 ? (audio.can() && e.b === 3 ? 'listen' : 'say') : 'type';
+    if (kind === 'type' && w.ex && clozeOf(w.ex[0]) && w.c && Math.random() < .5) { const q = makeCloze([w], chWords(w.lvl, findCh(w.lvl, w.c)))[0]; if (q && q.opts.length > 1) { T.push(Object.assign({ k: 'cloze', key: k }, q)); continue; } }
+    if (kind === 'type') T.push({ k: 'type', w, key: k, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) });
+    else T.push(Object.assign(choiceItem(kind, w, pool), { key: k }));
+  }
+  return { mode: 'rev', items: shuffle(T), i: 0, st: null, right: 0, graded: 0, again: new Set(), seen: new Set(), total: T.length };
+}
+const LS_LABEL = { intro: 'Palavra nova', tip: 'Dica de gramática', mean: 'O que significa?', say: 'Como se diz em polonês?', listen: 'Ouça e escolha', match: 'Ligue os pares', cloze: 'Complete a frase', order: 'Monte a frase', gcheck: 'Escolha a forma certa', dlg: 'Continue o diálogo', type: 'Escreva em polonês' };
+const lsKey = (R, t) => t.key || (t.w ? wkey(R.lvl || t.w.lvl, t.w.pl) : null);
+
+function runnerHTML(R) {
+  const t = R.items[R.i], st = R.st;
+  const pct = Math.round(R.i / R.items.length * 100);
+  const exit = R.mode === 'les' ? `#${R.lvl}-${R.n}` : '#nivel-' + ui.lvl;
+  const bar = `<div class="lsbar"><a class="lsx" href="${exit}" data-act="lsquit" aria-label="Sair">✕</a><span class="track"><i style="width:${pct}%"></i></span><span class="wc num">${Math.min(R.i + 1, R.items.length)}/${R.items.length}</span></div>`;
+  if (!t) return bar + lsEndHTML(R);
+  const choice = (opts, ans, pl) => `<div class="opts one">${opts.map((o, j) => `<button type="button" data-act="lspick" data-o="${j}" ${st ? 'disabled' : ''} ${pl ? 'lang="pl"' : ''} class="${st && o === ans ? 'right' : ''} ${st && st.pick === o && o !== ans ? 'wrong' : ''}">${esc(o)}</button>`).join('')}</div>`;
+  let body = '', cont = false;
+  if (t.k === 'intro') { cont = true; body = `<div class="lsword" lang="pl">${esc(t.w.pl)}</div><div class="bar-actions" style="justify-content:center">${sayBtn(firstForm(t.w.pl), 'a palavra')}<button class="btn ghost sm" type="button" data-act="slow" data-t="${esc(firstForm(t.w.pl))}">devagar</button></div>
+      <div class="lstr">${esc(t.w.pt)}</div>${t.w.note ? `<div class="meta">${esc(t.w.note)}</div>` : ''}${exampleBlock(t.w.ex)}<p class="meta">Ouça e repita em voz alta.</p>`; }
+  else if (t.k === 'tip') { cont = true; body = `<div class="gram lstip"><h4>${esc(t.g.t)}</h4>${t.g.h.replace(/<table>/g, '<div class="tblwrap"><table>').replace(/<\/table>/g, '</table></div>')}</div>`; }
+  else if (t.k === 'mean') body = `<div class="lsword sm" lang="pl">${esc(t.w.pl)} ${sayBtn(firstForm(t.w.pl), '', true)}</div>${choice(t.opts, t.ans)}`;
+  else if (t.k === 'say') body = `<div class="lsword sm">${esc(t.w.pt)}</div>${choice(t.opts, t.ans, true)}`;
+  else if (t.k === 'listen') body = `<div class="bar-actions" style="justify-content:center"><button class="btn sm" type="button" data-say="${esc(t.ans)}">▶ Ouvir</button><button class="btn ghost sm" type="button" data-act="slow" data-t="${esc(t.ans)}">devagar</button></div>${choice(t.opts, t.ans, true)}`;
+  else if (t.k === 'match') body = matchHTML(t.m, 'lsmatch');
+  else if (t.k === 'cloze') body = `<div class="clz" lang="pl">${esc(t.a)}<span class="blank">${st ? esc(st.pick) : '____'}</span>${esc(t.b)}</div><div class="hint">${esc(t.pt)}</div>${choice(t.opts, t.ans, true)}`;
+  else if (t.k === 'gcheck') { const c = t.c; body = `<div class="clz">${esc(c[0]).replace('___', `<span class="blank">${st ? esc(st.pick) : '____'}</span>`)}</div>${choice(c[1], c[1][c[2]], true)}`; }
+  else if (t.k === 'dlg') body = `<div class="lsdlg"><div class="who">${esc(t.prev[0])}</div><div lang="pl">${esc(t.prev[1])} ${sayBtn(t.prev[1], 'a fala', true)}</div><div class="hint">${esc(t.prev[2])}</div></div>
+      <p class="meta">${esc(t.line[0])} responde: <em>${esc(t.line[2])}</em></p>${choice(t.opts, t.ans, true)}`;
+  else if (t.k === 'order') body = `<div class="hint" style="margin:0 0 6px">${esc(t.pt)}</div>
+      <div class="tokens built">${t.built.map((x, j) => `<button type="button" data-act="lsunpick" data-j="${j}" ${st ? 'disabled' : ''} lang="pl">${esc(x.t)}</button>`).join('')}</div>
+      <div class="tokens">${t.pool.map((x, j) => `<button type="button" data-act="lstok" data-j="${j}" ${st ? 'disabled' : ''} lang="pl">${esc(x.t)}</button>`).join('')}</div>
+      ${!t.pool.length && !st ? `<button class="btn sm" type="button" data-act="lscheck">Verificar</button>` : ''}`;
+  else if (t.k === 'type') body = `<div class="lsword sm">${esc(t.w.pt)}</div>${t.w.ex ? `<div class="hint">Exemplo: ${esc(t.w.ex[1])}</div>` : ''}${keysHTML()}
+      <div class="bar-actions"><input class="pinput ${st ? st.res : ''}" id="linput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" lang="pl" value="${st ? esc(st.v) : ''}" ${st ? 'disabled' : ''} aria-label="Sua resposta">${st ? '' : '<button class="btn sm" type="button" data-act="lscheck">Verificar</button>'}</div>`;
+  const again = R.again.has(R.i) ? '<span class="lsagain">de novo</span>' : '';
+  return `${bar}<div class="lscard"><div class="prompt">${LS_LABEL[t.k]} ${again}</div>${body}</div>
+    ${cont ? `<div class="lsfoot"><button class="btn accent" type="button" data-act="lsnext" id="lsnext">Continuar →</button></div>` : st ? lsFeedback(t, st) : ''}`;
+}
+function lsAnswer(t) { return t.k === 'gcheck' ? t.c[1][t.c[2]] : t.k === 'type' ? t.ans[0] : t.k === 'order' ? t.text : t.ans; }
+function lsFeedback(t, st) {
+  const ok = st.res !== 'wrong', ans = lsAnswer(t);
+  const full = t.k === 'cloze' ? t.a + t.ans + t.b : t.k === 'gcheck' && /___/.test(t.c[0]) && !/:/.test(t.c[0]) ? t.c[0].replace('___', ans).replace(/\(.*?\)/g, '') : t.k === 'match' ? '' : ans;
+  const msg = t.k === 'match' ? (st.miss ? `Feito, com ${st.miss} erro(s).` : 'Perfeito!') : st.res === 'right' ? 'Certo!' : st.res === 'close' ? `Quase: confira os acentos. <b>${esc(ans)}</b>` : `Resposta: <b>${esc(ans)}</b>`;
+  const expl = t.k === 'gcheck' ? `<div class="meta">${esc(t.c[3])}</div>` : '';
+  const ex = !ok && t.w && t.w.ex && t.k !== 'cloze' ? `<div class="example small"><div class="exl" lang="pl">${markHTML(t.w.ex[0])}</div><div class="ext">${esc(t.w.ex[1])}</div></div>` : '';
+  return `<div class="lsfoot ${ok ? 'ok' : 'bad'}"><div class="lsmsg">${msg} ${full ? sayBtn(full, 'a resposta', true) : ''}${expl}${ex}${!ok && t.k !== 'match' ? '<div class="meta">Esta volta no fim.</div>' : ''}</div>
+    <button class="btn ${ok ? 'accent' : ''}" type="button" data-act="lsnext" id="lsnext">Continuar →</button></div>`;
+}
+function lsEndHTML(R) {
+  const pct = R.graded ? Math.round(R.right / R.graded * 100) : 100;
+  if (R.mode === 'rev') {
+    const left = srsDueKeys().length, tom = srsCountOn(dayPlus(1));
+    return `<div class="wcard"><div class="face">${pct}%</div><p class="meta">Revisão feita: ${R.total} palavras, ${R.right} de ${R.graded} respostas certas de primeira.</p>
+      <p class="meta">${left ? `Ainda há ${left} para hoje.` : 'Nada mais para hoje.'} Amanhã: ${tom} palavra(s).</p>
+      <div class="bar-actions" style="justify-content:center">${left ? '<button class="btn accent" type="button" data-act="rvstart">Mais uma rodada</button>' : ''}<a class="btn ghost sm" href="#nivel-${ui.lvl}">Voltar ao curso</a></div></div>`;
+  }
+  const ch = findCh(R.lvl, R.n), nb = batchesOf(R.lvl, ch).length;
+  return `<div class="wcard"><div class="face">Lição ${R.b + 1} concluída</div><p class="meta">${pct}% de acerto de primeira. As palavras desta lição entraram na sua revisão diária.</p>
+    <div class="bar-actions" style="justify-content:center">${R.b < nb - 1 ? `<button class="btn accent" type="button" data-act="lsgo" data-b="${R.b + 1}">Próxima lição →</button>` : `<a class="btn accent" href="#${R.lvl}-${R.n}-gramatica">Ir para a gramática completa →</a>`}
+    <a class="btn ghost sm" href="#${R.lvl}-${R.n}">Voltar ao capítulo</a></div></div>`;
+}
+function lsRecord(R, t, res, extra) {
+  R.st = Object.assign({ res }, extra || {});
+  const ok = res !== 'wrong';
+  const first = !R.seen.has(t); R.seen.add(t);
+  if (first) { R.graded++; if (ok) R.right++; }
+  const k = lsKey(R, t);
+  if (k && first) {
+    if (R.mode === 'rev') srsGrade(k, ok);
+    else { store.setBox(k, ok ? store.box(k) + 1 : Math.min(store.box(k), 1)); srsSeed(k); }
+  }
+  if (!ok && t.k !== 'match' && !t.requeued) { const c = Object.assign({}, t, { requeued: true }); if (c.k === 'order') { c.pool = shuffle(t.text.split(' ')).map((x, i) => ({ t: x, i })); c.built = []; } if (c.opts) c.opts = shuffle(c.opts); R.items.push(c); R.again.add(R.items.length - 1); R.seen.add(c); }
+  if (ok && audio.can() && t.k !== 'match') { const ans = lsAnswer(t); audio.say(t.k === 'cloze' ? t.a + t.ans + t.b : ans); }
+  store.log(); store.save();
+}
+function lsFinish(R) {
+  if (R.mode !== 'les') return;
+  const ch = findCh(R.lvl, R.n), id = chId(R.lvl, R.n), p = store.get(id), nb = batchesOf(R.lvl, ch).length;
+  for (const w of batchesOf(R.lvl, ch)[R.b]) srsSeed(wkey(R.lvl, w.pl));
+  p.vb = Math.max(p.vb || 0, R.b + 1);
+  if (p.vb >= nb && !p.vocab) { p.vocab = true; toast('Etapa Palavras concluída'); }
+  store.data.last = id; store.log(3); store.save();
+}
+function lessonsCard(ch, id) {
+  const nb = batchesOf(view.lvl, ch).length, vb = Math.min(store.get(id).vb || 0, nb);
+  return `<section class="lessons"><div><div class="eyebrow">Lição guiada · passo a passo</div>
+    <h3>${vb >= nb ? 'Todas as lições feitas' : vb ? `Lição ${vb + 1} de ${nb}` : `${nb} lições curtas`}</h3>
+    <p class="meta">Uma tela por vez: palavra nova, teste, pares, áudio, exemplo, dica de gramática e um trecho do diálogo. Uns 5 minutos cada.</p></div>
+    <div class="lchips">${Array.from({ length: nb }, (_, i) => `<button type="button" data-act="lsgo" data-b="${i}" class="${i < vb ? 'done' : i === vb ? 'next' : ''}" aria-label="Lição ${i + 1}">${i < vb ? '✓' : i + 1}</button>`).join('')}</div>
+    <button class="btn accent" type="button" data-act="lsgo" data-b="${vb >= nb ? 0 : vb}">${vb >= nb ? 'Refazer a lição 1' : vb ? 'Continuar' : 'Começar a lição 1'} →</button></section>`;
+}
+function reviewBanner() {
+  srsSync();
+  const n = srsDueKeys().length;
+  if (!n) return '';
+  return `<a class="revbanner" href="#revisao"><span class="eyebrow">Revisão de hoje</span><b>${n} palavra${n > 1 ? 's' : ''} para revisar</b><span class="meta">${Math.max(1, Math.round(Math.min(n, 20) * 0.25))} min · revisar agora →</span></a>`;
+}
+function renderLesson() {
+  const ch = findCh(view.lvl, view.n);
+  if (!ui.ls || ui.ls.mode !== 'les' || ui.ls.n !== ch.n || ui.ls.lvl !== view.lvl) { const nb = batchesOf(view.lvl, ch).length; ui.ls = buildLesson(view.lvl, ch, Math.min(store.get(chId(view.lvl, ch.n)).vb || 0, nb - 1)); }
+  app.innerHTML = `<div class="lsmain"><div class="eyebrow lsctx">${view.lvl.toUpperCase()} · Cap. ${ch.n} · ${esc(ch.pl)} · Lição ${ui.ls.b + 1}</div>${runnerHTML(ui.ls)}</div>`;
+  lsAuto();
+}
+function renderReview() {
+  srsSync();
+  const n = srsDueKeys().length, total = Object.keys(srs()).length;
+  if (!ui.ls || ui.ls.mode !== 'rev') {
+    const next = [1, 2, 3, 7].map(d => [d, srsCountOn(dayPlus(d))]);
+    app.innerHTML = `<section class="hero"><div><div class="eyebrow">Revisão espaçada</div><h1>${n ? `<em>${n}</em> palavra${n > 1 ? 's' : ''} para hoje` : 'Tudo em <em>dia</em>'}</h1>
+      <p>${total ? `Cada palavra que você aprende volta para revisão no momento certo: logo no dia seguinte, depois em 2, 4, 7, 15, 30 e 60 dias. Se errar, ela volta a aparecer amanhã.` : 'Ainda não há palavras na revisão. Faça uma lição guiada ou um bloco de palavras e elas aparecem aqui a partir de amanhã.'}</p>
+      ${n ? `<button class="btn accent" type="button" data-act="rvstart">Começar a revisão${n > 20 ? ' (20 por rodada)' : ''} →</button>` : `<a class="btn accent" href="#nivel-${ui.lvl}">Ir para o curso →</a>`}</div></section>
+      ${total ? `<div class="tiles"><div class="tile"><b>${total}</b><span>palavras na revisão</span></div>${next.map(([d, c]) => `<div class="tile"><b>${c}</b><span>${d === 1 ? 'amanhã' : `em ${d} dias`}</span></div>`).join('')}</div>` : ''}`;
+    return;
+  }
+  app.innerHTML = `<div class="lsmain"><div class="eyebrow lsctx">Revisão de hoje</div>${runnerHTML(ui.ls)}</div>`;
+  lsAuto();
+}
+function lsAuto() {
+  const R = ui.ls, t = R && R.items[R.i]; if (!t || R.st) return;
+  if (t.k === 'listen') setTimeout(() => audio.say(t.ans), 250);
+  if (t.k === 'intro' && audio.can()) setTimeout(() => audio.say(firstForm(t.w.pl)), 250);
+  if (t.k === 'type') setTimeout(() => document.getElementById('linput')?.focus(), 60);
+}
+function lsRerender() { render(); }
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act, R = ui.ls;
+  if (a === 'lsgo') { const ch = findCh(view.lvl, view.n); ui.ls = buildLesson(view.lvl, ch, +b.dataset.b); go(`${view.lvl}-${view.n}-licao`); window.scrollTo(0, 0); return; }
+  if (a === 'rvstart') { ui.ls = buildReview(); if (!ui.ls.items.length) { ui.ls = null; toast('Nada para revisar agora.'); } render(); window.scrollTo(0, 0); return; }
+  if (a === 'lsquit') { ui.ls = null; return; }
+  if (!R || !a.startsWith('ls')) return;
+  const t = R.items[R.i];
+  if (a === 'lspick' && !R.st) { const opts = t.k === 'gcheck' ? t.c[1] : t.opts, pick = opts[+b.dataset.o]; lsRecord(R, t, pick === lsAnswer(t) ? 'right' : 'wrong', { pick }); }
+  else if (a === 'lsmatch' && !R.st) { if (matchTap(t.m, b.dataset.side, +b.dataset.i, t.words)) { R.st = { res: t.m.miss <= 1 ? 'right' : 'wrong', miss: t.m.miss }; R.graded++; if (t.m.miss <= 1) R.right++; for (const w of t.words) srsSeed(wkey(R.lvl, w.pl)); } }
+  else if (a === 'lstok') t.built.push(t.pool.splice(+b.dataset.j, 1)[0]);
+  else if (a === 'lsunpick') t.pool.push(t.built.splice(+b.dataset.j, 1)[0]);
+  else if (a === 'lscheck' && !R.st) {
+    if (t.k === 'order') lsRecord(R, t, norm(t.built.map(x => x.t).join(' ')) === norm(t.text) ? 'right' : 'wrong');
+    else { const v = (document.getElementById('linput') || {}).value || ''; if (!v.trim()) { toast('Escreva sua resposta.'); return; } lsRecord(R, t, judge(v, t.ans), { v }); }
+  }
+  else if (a === 'lsnext') { R.i++; R.st = null; if (R.i >= R.items.length) lsFinish(R); }
+  else return;
+  lsRerender();
+  if (a === 'lsnext') window.scrollTo(0, 0); else document.querySelector('.lsfoot')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter' || !ui.ls) return;
+  if (e.target.id === 'linput') { e.preventDefault(); document.querySelector('[data-act="lscheck"]')?.click(); }
+  else if (document.getElementById('lsnext') && !e.target.matches('textarea, input')) { e.preventDefault(); document.getElementById('lsnext').click(); }
+});
+
 /* ---------- Início ---------- */
-route();
 store.init();
+route();
 audio.init();
 setSync('Progresso salvo neste navegador.');
 })();
