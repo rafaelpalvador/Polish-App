@@ -1,0 +1,106 @@
+name: Build (Android + Desktop)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Instalar Capacitor
+        run: npm install --legacy-peer-deps
+      - name: Montar www
+        run: |
+          mkdir www
+          cp index.html www/
+          cp -r data www/data
+      - name: Criar projeto Android
+        run: |
+          npx cap add android
+          npx cap sync android
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<application#<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>\n    <application#' $M
+          G=android/app/build.gradle
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}0/; s/versionName \"1.0\"/versionName \"2.${{ github.run_number }}\"/" $G
+      - name: Compilar
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
+      - name: Assinar
+        run: |
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          UNSIGNED=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          $BT/zipalign -p -f 4 "$UNSIGNED" aligned.apk
+          $BT/apksigner sign --ks signing/polski.jks --ks-pass pass:polskipowoli --key-pass pass:polskipowoli --ks-key-alias polski --out polski-powoli.apk aligned.apk
+          $BT/apksigner verify polski-powoli.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: polski-powoli.apk
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Copiar o app
+        shell: bash
+        run: |
+          mkdir -p desktop/app
+          cp index.html desktop/app/
+          cp -r data desktop/app/data
+      - name: Instalar Electron
+        working-directory: desktop
+        run: npm install
+      - name: Empacotar
+        working-directory: desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then T="--win"; else T="--linux"; fi
+          npx electron-builder $T --publish never -c.extraMetadata.version=2.${{ github.run_number }}.0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+            desktop/dist/*-setup.exe
+
+  release:
+    needs: [apk, desktop]
+    if: ${{ !cancelled() && needs.apk.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publicar Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          gh release create "v2.${{ github.run_number }}" out/* \
+            --title "Polski, powoli 2.${{ github.run_number }}" \
+            --notes "Android: polski-powoli.apk (Obtainium). Windows: arquivo -setup.exe. Linux: .AppImage ou .deb. Para sincronizar celular e computador, toque no indicador de áudio no topo do app e conecte o mesmo token do GitHub nos dois."

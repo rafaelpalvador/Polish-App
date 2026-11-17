@@ -597,6 +597,7 @@ const store = {
   saving: Promise.resolve(), timer: null,
   save(now) {
     try { localStorage.setItem(this.key, JSON.stringify(this.data)); } catch (e) {}
+    gsync.schedule();
     if (!this.db) return;
     clearTimeout(this.timer);
     const run = () => { const body = JSON.parse(JSON.stringify(this.data)); this.saving = this.saving.then(() => this.ref().set(body)).catch(() => setSync('Não consegui salvar na conta agora; ficou salvo neste navegador.')); };
@@ -615,7 +616,8 @@ const store = {
   },
   essayTimers: {}, essayQueue: {},
   saveEssay(id, now) {
-    try { localStorage.setItem(this.key + '-essays', JSON.stringify(this.essays)); } catch (e) {}
+    try { if (this.essays[id]) this.essays[id].dAt = new Date().toISOString(); localStorage.setItem(this.key + '-essays', JSON.stringify(this.essays)); } catch (e) {}
+    gsync.schedule();
     if (!this.db) return;
     clearTimeout(this.essayTimers[id]);
     const run = () => { const body = JSON.parse(JSON.stringify(this.essays[id])); this.essayQueue[id] = (this.essayQueue[id] || Promise.resolve()).then(() => this.essayRef(id).set(body)).catch(() => {}); };
@@ -642,6 +644,90 @@ function mergeProgress(a, b) {
   const seen = new Set(); out.grades = [...a.grades, ...b.grades].filter(g => { const k = g.id + g.at; if (seen.has(k)) return false; seen.add(k); return true; }).sort((p, q) => p.at < q.at ? -1 : 1);
   return out;
 }
+
+/* ---------- Sincronização entre aparelhos: Gist privado do GitHub ---------- */
+function mergeEssays(a, b) {
+  const out = {};
+  for (const id of new Set([...Object.keys(a || {}), ...Object.keys(b || {})])) {
+    const x = (a || {})[id] || { attempts: [], draft: '' }, y = (b || {})[id] || { attempts: [], draft: '' };
+    const seen = new Set();
+    const attempts = [...(x.attempts || []), ...(y.attempts || [])].filter(t => { const k = (t.at || '') + '|' + (t.text || '').slice(0, 40); if (seen.has(k)) return false; seen.add(k); return true; }).sort((p, q) => (p.at || '') < (q.at || '') ? -1 : 1);
+    const dx = x.draft || '', dy = y.draft || '';
+    out[id] = { attempts, draft: (x.dAt || '') > (y.dAt || '') ? dx : (dy || dx), dAt: (x.dAt || '') > (y.dAt || '') ? x.dAt : (y.dAt || x.dAt) };
+  }
+  return out;
+}
+const gsync = {
+  KEY_T: 'polski-gh-token', KEY_G: 'polski-gh-gist', DESC: 'Polski, powoli · sincronização (não apagar)', FILE: 'polski-progresso.json',
+  token: '', gist: '', busy: false, timer: null, last: '', status: '',
+  load() { try { this.token = localStorage.getItem(this.KEY_T) || ''; this.gist = localStorage.getItem(this.KEY_G) || ''; } catch (e) {} },
+  on() { return !!this.token; },
+  async api(path, opt = {}) {
+    const r = await fetch('https://api.github.com' + path, Object.assign({}, opt, { headers: Object.assign({ Authorization: 'Bearer ' + this.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }, opt.body ? { 'Content-Type': 'application/json' } : {}) }));
+    if (r.status === 401) throw new Error('token');
+    if (!r.ok) throw new Error('http ' + r.status);
+    return r.status === 204 ? null : r.json();
+  },
+  body() { return JSON.stringify({ v: 1, at: new Date().toISOString(), data: store.data, essays: store.essays }); },
+  async findOrCreate() {
+    if (this.gist) { try { await this.api('/gists/' + this.gist); return; } catch (e) { if (e.message === 'token') throw e; this.gist = ''; } }
+    for (let page = 1; page <= 5 && !this.gist; page++) {
+      const list = await this.api('/gists?per_page=100&page=' + page);
+      const g = list.find(x => x.description === this.DESC || (x.files && x.files[this.FILE])); if (g) this.gist = g.id;
+      if (list.length < 100) break;
+    }
+    if (!this.gist) { const g = await this.api('/gists', { method: 'POST', body: JSON.stringify({ description: this.DESC, public: false, files: { [this.FILE]: { content: this.body() } } }) }); this.gist = g.id; }
+    try { localStorage.setItem(this.KEY_G, this.gist); } catch (e) {}
+  },
+  async remote() {
+    const g = await this.api('/gists/' + this.gist); const f = g.files && g.files[this.FILE]; if (!f) return null;
+    let txt = f.content; if (f.truncated && f.raw_url) txt = await (await fetch(f.raw_url)).text();
+    try { return JSON.parse(txt); } catch (e) { return null; }
+  },
+  setStatus(t) { this.status = t; setSync(t); const el = document.getElementById('gsstatus'); if (el) el.textContent = t; },
+  async sync(quiet) {
+    if (!this.on() || this.busy) return; this.busy = true;
+    try {
+      await this.findOrCreate();
+      const r = await this.remote();
+      if (r && r.data) {
+        const before = JSON.stringify([store.data, store.essays]);
+        store.data = mergeProgress(store.data, r.data); store.essays = mergeEssays(store.essays, r.essays || {});
+        try { localStorage.setItem(store.key, JSON.stringify(store.data)); localStorage.setItem(store.key + '-essays', JSON.stringify(store.essays)); } catch (e) {}
+        if (before !== JSON.stringify([store.data, store.essays]) && !quiet) render();
+      }
+      await this.api('/gists/' + this.gist, { method: 'PATCH', body: JSON.stringify({ files: { [this.FILE]: { content: this.body() } } }) });
+      this.last = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      this.setStatus('Sincronizado com o GitHub às ' + this.last + '.');
+    } catch (e) {
+      this.setStatus(e.message === 'token' ? 'Token do GitHub inválido ou sem permissão de gist.' : (navigator.onLine === false ? 'Sem internet: progresso salvo neste aparelho, sincroniza quando voltar.' : 'Não consegui sincronizar agora (' + e.message + ').'));
+    } finally { this.busy = false; }
+  },
+  schedule() { if (!this.on()) return; clearTimeout(this.timer); this.timer = setTimeout(() => this.sync(true), 8000); },
+  async connect(tok) {
+    this.token = tok.trim(); this.gist = '';
+    try { localStorage.setItem(this.KEY_T, this.token); localStorage.removeItem(this.KEY_G); } catch (e) {}
+    this.setStatus('Conectando…'); await this.sync();
+  },
+  off() { this.token = ''; this.gist = ''; try { localStorage.removeItem(this.KEY_T); localStorage.removeItem(this.KEY_G); } catch (e) {} this.setStatus('Sincronização desligada. Progresso salvo só neste aparelho.'); },
+  init() {
+    this.load(); if (!this.on()) return;
+    this.sync();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { clearTimeout(this.timer); this.sync(true); } else this.sync(); });
+    window.addEventListener('online', () => this.sync());
+    setInterval(() => { if (document.visibilityState === 'visible') this.sync(true); }, 5 * 60 * 1000);
+  },
+};
+function syncHTML() {
+  return `<h4>Sincronizar celular e computador</h4>
+  <p>O progresso, as revisões e as redações ficam num <b>Gist privado</b> da sua conta do GitHub. Use o <b>mesmo token</b> no celular e no computador.</p>
+  ${gsync.on() ? `<p><b>Conectado.</b> <span id="gsstatus">${esc(gsync.status || 'Sincronizando…')}</span></p>
+  <p><button class="btn sm" type="button" data-act="gssync">Sincronizar agora</button> <button class="btn ghost sm" type="button" data-act="gsoff">Desligar</button></p>`
+  : `<ol><li>Abra <b>github.com/settings/tokens</b> → <i>Generate new token (classic)</i>.</li><li>Marque só a permissão <b>gist</b> e escolha validade “No expiration”.</li><li>Copie o token e cole aqui (faça o mesmo no outro aparelho).</li></ol>
+  <p><input id="ghtoken" type="password" autocomplete="off" placeholder="ghp_..." style="width:100%;max-width:340px;padding:8px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:inherit"> <button class="btn sm" type="button" data-act="gsconnect">Conectar</button></p>
+  <p id="gsstatus" class="wc">${esc(gsync.status)}</p>`}`;
+}
+
 function setSync(t) { document.getElementById('syncnote').textContent = t; }
 
 /* ---------- Áudio: voz do Claude, ou voz polonesa do aparelho ---------- */
@@ -701,13 +787,14 @@ function audioHelpHTML() {
     <li><b>No app do Claude no celular</b> a voz do Claude não está disponível. Abra o curso no navegador do celular (Chrome ou Safari) pelo link do artefato.</li>
     <li><b>Android:</b> Configurações → Sistema → Idiomas → Saída de texto para fala → Mecanismo do Google → Instalar dados de voz → <i>Polski</i>.</li>
     <li><b>iPhone:</b> Ajustes → Acessibilidade → Conteúdo Falado → Vozes → Polonês → baixe uma voz (por exemplo, Zosia).</li>
+    <li><b>Computador (Windows):</b> Configurações → Hora e idioma → Idioma → adicionar <i>Polski</i> com o recurso <i>Fala</i>. <b>Linux:</b> instale <code>speech-dispatcher</code> e <code>espeak-ng</code>.</li>
     <li>Depois de instalar, feche e abra a página de novo.</li>
   </ol>
   <p>Velocidade: <span class="rate">${[0.7, 0.85, 1].map(r => `<button type="button" data-act="rate" data-r="${r}" aria-pressed="${Math.abs(audio.rate - r) < .06}">${r === 0.7 ? 'Bem devagar' : r === 0.85 ? 'Devagar' : 'Normal'}</button>`).join('')}</span>
   <button class="btn ghost sm" type="button" data-say="Dzień dobry! Jak się masz?">Testar: „Dzień dobry! Jak się masz?”</button></p>
   <h4>Microfone</h4>
   <p>Para ouvir você, o app usa o <b>Whisper</b>, que roda no próprio aparelho (baixa cerca de 80 MB na primeira vez). Se ele não carregar, usa o reconhecimento de voz do sistema, quando existe.</p>
-  <p><span class="rate"><button type="button" data-act="vpref" data-v="whisper" aria-pressed="${voice.pref !== 'system'}">Whisper</button><button type="button" data-act="vpref" data-v="system" aria-pressed="${voice.pref === 'system'}" ${voice.sysSR() ? '' : 'disabled'}>Voz do sistema</button></span></p></div>`;
+  <p><span class="rate"><button type="button" data-act="vpref" data-v="whisper" aria-pressed="${voice.pref !== 'system'}">Whisper</button><button type="button" data-act="vpref" data-v="system" aria-pressed="${voice.pref === 'system'}" ${voice.sysSR() ? '' : 'disabled'}>Voz do sistema</button></span></p>${syncHTML()}</div>`;
 }
 
 /* ---------- IA ---------- */
@@ -1514,6 +1601,9 @@ document.addEventListener('click', async e => {
   switch (a) {
     case 'level': go(b.dataset.go); break;
     case 'audiohelp': ui.showHelp = !ui.showHelp; render(); if (ui.showHelp) document.getElementById('audiohelp')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); break;
+    case 'gsconnect': { const v = (document.getElementById('ghtoken') || {}).value || ''; if (v.trim().length < 20) { toast('Cole o token do GitHub.'); break; } await gsync.connect(v); render(); break; }
+    case 'gssync': gsync.sync(); break;
+    case 'gsoff': gsync.off(); render(); break;
     case 'rate': audio.rate = +b.dataset.r; try { localStorage.setItem('polski-rate', audio.rate); } catch (err) {} render(); audio.say('Dzień dobry!'); break;
     case 'tab': go(`${view.lvl}-${view.n}-${b.dataset.tab}`); document.querySelector('.tabs')?.scrollIntoView({ block: 'start' }); break;
     case 'mark': store.mark(id, b.dataset.step); toast('Etapa concluída'); render(); break;
@@ -1996,6 +2086,7 @@ store.init();
 route();
 audio.init();
 setSync('Progresso salvo neste navegador.');
+gsync.init();
 })();
 </script>
 </body>

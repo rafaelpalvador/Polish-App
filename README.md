@@ -61,3 +61,8 @@ COURSE.add('b1', {
   write: { p: 'Tarefa', c: ['Checklist'], min: 80 },
 });
 ```
+
+## Apps (Android, Windows, Linux) e sincronização
+- Cada envio para `main` gera uma Release com `polski-powoli.apk` (Android/Obtainium), `polski-powoli-<versão>-setup.exe` (Windows) e `.AppImage`/`.deb` (Linux). Download: https://github.com/rafaelpalvador/Polish-App/releases/latest
+- Desktop feito com Electron (pasta `desktop/`). Voz no Windows: instalar o polonês com o recurso Fala. No Linux: `speech-dispatcher` + `espeak-ng`.
+- Sincronização: progresso, revisões e redações vão para um Gist privado do GitHub. Gere um token clássico só com a permissão `gist` e cole o mesmo token em todos os aparelhos (indicador de áudio no topo → Sincronizar).

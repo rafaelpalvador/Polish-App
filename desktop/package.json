@@ -1,0 +1,23 @@
+{
+  "name": "polski-powoli",
+  "productName": "Polski powoli",
+  "version": "1.0.0",
+  "description": "Polski, powoli - curso de polonês do A1 ao B2",
+  "main": "main.js",
+  "author": { "name": "Rafael Palvador", "email": "rafaelpalvador@users.noreply.github.com" },
+  "homepage": "https://github.com/rafaelpalvador/Polish-App",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "br.polski.powoli",
+    "productName": "Polski powoli",
+    "artifactName": "polski-powoli-${version}-${arch}.${ext}",
+    "files": ["main.js", "app/**/*"],
+    "linux": { "target": ["AppImage", "deb"], "category": "Education", "maintainer": "Rafael Palvador" },
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "artifactName": "polski-powoli-${version}-setup.${ext}" }
+  }
+}
