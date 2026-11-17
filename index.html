@@ -655,7 +655,7 @@ const audio = {
         pick(); speechSynthesis.onvoiceschanged = pick; setTimeout(pick, 1200);
       }
     } catch (e) {}
-    try { if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) this.native = Capacitor.registerPlugin('TextToSpeech'); } catch (e) {}
+    try { const C = window.Capacitor; if (C && C.isNativePlatform && C.isNativePlatform()) this.native = (C.Plugins && C.Plugins.TextToSpeech) || (C.registerPlugin ? C.registerPlugin('TextToSpeech') : null); } catch (e) {}
     try { if (window.claude?.use) { this.tts = await claude.use('tts'); this.update(); } } catch (e) {}
     this.update();
   },
@@ -695,6 +695,7 @@ const audio = {
 };
 function audioHelpHTML() {
   return `<div class="audiohelp" id="audiohelp"><h4>Como ativar o áudio</h4>
+  <p class="mono" style="font-size:12px;color:var(--muted)">Diagnóstico: plataforma nativa ${(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ? "sim" : "não"} · plugin de voz ${audio.native ? "ok" : "não carregado"} · voz do navegador ${audio.voice ? "ok" : "não encontrada"}</p>
   <p>${audio.mode() === 'claude' ? 'Você está ouvindo a voz do Claude, que só funciona no navegador.' : audio.mode() === 'device' ? 'Você está ouvindo a voz polonesa do seu aparelho.' : 'Esta tela não tem nenhuma voz polonesa disponível.'} O app tenta, nesta ordem: a voz do Claude (navegador no computador), e depois a voz polonesa do aparelho.</p>
   <ol>
     <li><b>No app do Claude no celular</b> a voz do Claude não está disponível. Abra o curso no navegador do celular (Chrome ou Safari) pelo link do artefato.</li>
