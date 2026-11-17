@@ -7,7 +7,8 @@ Curso de polonês sem pressa, para quem fala português do Brasil. Segue os tema
 - **A1:** 19 capítulos e 19 paradas por cidades e regiões da Polônia.
 - **A2:** 12 capítulos (2 para cada capítulo do Busuu) e 6 paradas.
 - **B1:** 8 capítulos (2 para cada capítulo do Busuu) e 4 paradas.
-- **Bancos de vocabulário** do A1 ao B2.
+- **B2:** 10 capítulos (24 lições do Busuu), 409 palavras com exemplo e 5 paradas (Hel, Bieszczady, Toruń, Łódź, Cracóvia).
+- **Bancos de vocabulário** do A1 ao B2 (A1 1056, A2 1032, B1 819, B2 915 palavras, somando capítulos e bancos; metas: A2 ~1500, B1 2000–2500).
 
 Cada capítulo começa com **lições guiadas**, uma tela por vez como no Babbel: palavra nova com áudio, teste logo em seguida, pares, escuta, exemplo para completar, dica de gramática, trecho do diálogo e frase para montar. Erros voltam no fim da lição.
 
@@ -36,7 +37,8 @@ build/voice.js        microfone com Whisper (já incluído no index.html)
 build/extra.css       estilos extras
 data/a1-*.js          capítulos do A1
 data/ex-a1-*.js       exemplos e testes do A1
-data/a2-*.js, b1-*.js capítulos do A2 e do B1 (exemplos embutidos)
+data/a2-*.js, b1-*.js, b2-*.js capítulos do A2, B1 e B2 (exemplos embutidos)
+data/banco-mais.js ampliação dos bancos de A2, B1 e B2 (descarta palavras repetidas)
 data/curiosidades*.js paradas entre capítulos
 data/banco-*.js       bancos de vocabulário
 ```

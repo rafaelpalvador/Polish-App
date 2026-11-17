@@ -494,7 +494,17 @@ window.COURSE = {
     if (Object.keys(ex).length || ch.checks) { const k = level + '-' + ch.n, o = this.extras[k] || {}; this.extras[k] = { ex: Object.assign(o.ex || {}, ex), checks: ch.checks || o.checks || [] }; }
     (this.levels[level] = this.levels[level] || []).push(ch); this.levels[level].sort((a, b) => a.n - b.n);
   },
-  bank(level, groups) { (this.banks[level] = this.banks[level] || []).push(...groups); },
+  bank(level, groups, dedupe) {
+    /* Com dedupe=true, descarta palavras que já existem nos capítulos ou nos bancos do nível. */
+    if (dedupe) {
+      const key = x => String(x).toLowerCase().split(' / ')[0].trim();
+      const seen = new Set();
+      for (const c of this.levels[level] || []) for (const g of c.vocab || []) for (const w of g.w) seen.add(key(w[0]));
+      for (const g of this.banks[level] || []) for (const w of g.w) seen.add(key(w[0]));
+      groups = groups.map(g => Object.assign({}, g, { w: g.w.filter(w => { const k = key(w[0]); if (seen.has(k)) return false; seen.add(k); return true; }) })).filter(g => g.w.length);
+    }
+    (this.banks[level] = this.banks[level] || []).push(...groups);
+  },
   stops(level, list) { this.stopsBy[level] = list; },
   extra(level, n, obj) { this.extras[level + '-' + n] = obj; },
 };
@@ -520,11 +530,18 @@ window.COURSE = {
 <script src="data/b1-3.js"></script>
 <script src="data/b1-4.js"></script>
 <script src="data/curiosidades-b1.js"></script>
+<script src="data/b2-1.js"></script>
+<script src="data/b2-2.js"></script>
+<script src="data/b2-3.js"></script>
+<script src="data/b2-4.js"></script>
+<script src="data/b2-5.js"></script>
+<script src="data/curiosidades-b2.js"></script>
 <script src="data/banco-a1.js"></script>
 <script src="data/banco-a2.js"></script>
 <script src="data/banco-b1.js"></script>
 <script src="data/banco-b2.js"></script>
 <script src="data/banco-extra.js"></script>
+<script src="data/banco-mais.js"></script>
 <script>
 (() => {
 'use strict';
