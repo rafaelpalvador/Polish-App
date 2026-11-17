@@ -5,7 +5,7 @@ Curso de polonês sem pressa, para quem fala português do Brasil. Segue os tema
 ## Conteúdo
 
 - **A1:** 25 capítulos (19 do Busuu + 6 do Babbel A1, sem repetir assuntos) e 19 paradas por cidades e regiões da Polônia.
-- **A2:** 12 capítulos (2 para cada capítulo do Busuu) e 6 paradas.
+- **A2:** 20 capítulos (12 do Busuu + 8 do Babbel A2, sem repetir assuntos) e 6 paradas.
 - **B1:** 8 capítulos (2 para cada capítulo do Busuu) e 4 paradas.
 - **B2:** 10 capítulos (24 lições do Busuu), 409 palavras com exemplo e 5 paradas (Hel, Bieszczady, Toruń, Łódź, Cracóvia).
 - **Bancos de vocabulário** do A1 ao B2 (A1 1306, A2 1032, B1 819, B2 915 palavras, somando capítulos e bancos; metas: A2 ~1500, B1 2000–2500).
