@@ -146,7 +146,7 @@ details.busuu ol { margin: 6px 0 0; padding-left: 20px; }
 .say { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); display: inline-grid; place-items: center; color: var(--muted); padding: 0; }
 .say:hover { color: var(--accent); border-color: var(--accent); }
 .say svg { width: 15px; height: 15px; }
-.no-audio .say, .no-audio .say-label { display: none; }
+.no-audio .say-label { display: none; }
 @media (max-width: 520px) { .vrow { grid-template-columns: 1fr 34px; } .vrow .tr { grid-column: 1; grid-row: 2; font-size: 14.5px; color: var(--muted); } .vrow .say { grid-row: 1 / span 2; grid-column: 2; } .vrow .note { grid-column: 1; } }
 
 /* Cartões */
@@ -646,7 +646,7 @@ function setSync(t) { document.getElementById('syncnote').textContent = t; }
 
 /* ---------- Áudio: voz do Claude, ou voz polonesa do aparelho ---------- */
 const audio = {
-  tts: null, voice: null, rate: 0.9,
+  tts: null, voice: null, native: null, rate: 0.9,
   async init() {
     try { this.rate = +(localStorage.getItem('polski-rate') || 0.9); } catch (e) {}
     try {
@@ -655,11 +655,12 @@ const audio = {
         pick(); speechSynthesis.onvoiceschanged = pick; setTimeout(pick, 1200);
       }
     } catch (e) {}
+    try { if (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform()) this.native = Capacitor.registerPlugin('TextToSpeech'); } catch (e) {}
     try { if (window.claude?.use) { this.tts = await claude.use('tts'); this.update(); } } catch (e) {}
     this.update();
   },
-  can() { return !!(this.tts || this.voice); },
-  mode() { return this.tts ? 'claude' : this.voice ? 'device' : 'none'; },
+  can() { return !!(this.tts || this.native || this.voice); },
+  mode() { return this.tts ? 'claude' : (this.native || this.voice) ? 'device' : 'none'; },
   update() {
     document.body.classList.toggle('no-audio', !this.can());
     const c = document.getElementById('audiochip'); if (!c) return;
@@ -678,6 +679,10 @@ const audio = {
         if (!this.voice) { onEnd && onEnd(); if (e && e.code === 'rate_limited') toast('Muitos áudios seguidos. Espere um pouco.'); return; }
       }
     }
+    if (this.native) {
+      try { await this.native.speak({ text, lang: 'pl-PL', rate: this.rate, pitch: 1.0, volume: 1.0, category: 'playback' }); onEnd && onEnd(); return; }
+      catch (e) { toast('Sem voz polonesa no Android. Em Configurações > Idioma > Saída de texto para voz, instale o polonês no Google.'); onEnd && onEnd(); return; }
+    }
     if (this.voice) {
       try {
         speechSynthesis.cancel();
@@ -686,7 +691,7 @@ const audio = {
       } catch (e) { onEnd && onEnd(); }
     } else { toast('Sem voz polonesa nesta tela. Veja "Como ativar o áudio".'); onEnd && onEnd(); }
   },
-  stop() { try { this.tts && this.tts.stop(); } catch (e) {} try { window.speechSynthesis && speechSynthesis.cancel(); } catch (e) {} },
+  stop() { try { this.tts && this.tts.stop(); } catch (e) {} try { this.native && this.native.stop(); } catch (e) {} try { window.speechSynthesis && speechSynthesis.cancel(); } catch (e) {} },
 };
 function audioHelpHTML() {
   return `<div class="audiohelp" id="audiohelp"><h4>Como ativar o áudio</h4>
