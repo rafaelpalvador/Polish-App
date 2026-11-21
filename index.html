@@ -278,7 +278,13 @@ details.busuu ol { margin: 6px 0 0; padding-left: 20px; }
 .audiohelp { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; margin-top: 12px; font-size: 14.5px; }
 .audiohelp h4 { margin: 0 0 6px; font-family: var(--display); font-weight: 400; font-size: 22px; }
 .audiohelp ol { margin: 6px 0; padding-left: 20px; }
-.rate { display: inline-flex; gap: 4px; align-items: center; }
+.rate { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.ratebar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 8px 0 12px; font-size: 13px; color: var(--muted); }
+.moreex { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); text-align: left; }
+.moreex .mxh { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.moreex .mx { margin: 4px 0 8px; } .moreex .tr { color: var(--muted); font-size: .92em; }
+.gram .simple, .gsimple { border-left: 3px solid var(--accent); padding-left: 12px; }
+.br { background: color-mix(in srgb, #2e9e5b 12%, transparent); border-left: 3px solid #2e9e5b; border-radius: 8px; padding: 8px 12px; margin: 8px 0; }
 .rate button { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 2px 8px; font-size: 13px; }
 .rate button[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); font-weight: 600; }
 
@@ -480,7 +486,7 @@ mark { background: var(--accent-soft); color: var(--accent); border-radius: 4px;
 /* Registro dos níveis. Para adicionar capítulos de um nível: crie data/a2-1.js etc. com COURSE.add('a2', {...})
    e inclua a tag <script> abaixo. Bancos de vocabulário: COURSE.bank(nível, grupos). Paradas: COURSE.stops(nível, lista). */
 window.COURSE = {
-  levels: {}, banks: {}, stopsBy: {}, extras: {},
+  levels: {}, banks: {}, stopsBy: {}, extras: {}, moreEx: {},
   meta: [
     { id: 'a1', name: 'A1', title: 'Iniciante' },
     { id: 'a2', name: 'A2', title: 'Elementar' },
@@ -494,6 +500,8 @@ window.COURSE = {
     if (Object.keys(ex).length || ch.checks) { const k = level + '-' + ch.n, o = this.extras[k] || {}; this.extras[k] = { ex: Object.assign(o.ex || {}, ex), checks: ch.checks || o.checks || [] }; }
     (this.levels[level] = this.levels[level] || []).push(ch); this.levels[level].sort((a, b) => a.n - b.n);
   },
+  more(level, map) { const m = (this.moreEx[level] = this.moreEx[level] || {}); for (const k in map) m[k] = (m[k] || []).concat(map[k]); },
+  simple(level, n, sec) { const c = (this.levels[level] || []).find(x => x.n === n); if (c && !c.grammar.some(g => g.simple)) c.grammar.unshift(Object.assign({ simple: true }, sec)); },
   bank(level, groups, dedupe) {
     /* Com dedupe=true, descarta palavras que já existem nos capítulos ou nos bancos do nível. */
     if (dedupe) {
@@ -549,6 +557,9 @@ window.COURSE = {
 <script src="data/banco-mais2.js"></script>
 <script src="data/banco-mais3.js"></script>
 <script src="data/banco-mais4.js"></script>
+<script src="data/exemplos-a1-1.js"></script>
+<script src="data/exemplos-a1-2.js"></script>
+<script src="data/gramatica-simples-a1.js"></script>
 <script>
 (() => {
 'use strict';
@@ -732,9 +743,9 @@ function setSync(t) { document.getElementById('syncnote').textContent = t; }
 
 /* ---------- Áudio: voz do Claude, ou voz polonesa do aparelho ---------- */
 const audio = {
-  tts: null, voice: null, native: null, rate: 0.9,
+  tts: null, voice: null, native: null, rate: 0.75,
   async init() {
-    try { this.rate = +(localStorage.getItem('polski-rate') || 0.9); } catch (e) {}
+    try { this.rate = +(localStorage.getItem('polski-rate') || 0.75); } catch (e) {}
     try {
       if (window.speechSynthesis) {
         const pick = () => { const vs = speechSynthesis.getVoices(); this.voice = vs.find(v => /^pl(-|_|$)/i.test(v.lang) && /google|natural|online/i.test(v.name)) || vs.find(v => /^pl/i.test(v.lang)) || null; this.update(); };
@@ -790,7 +801,7 @@ function audioHelpHTML() {
     <li><b>Computador (Windows):</b> Configurações → Hora e idioma → Idioma → adicionar <i>Polski</i> com o recurso <i>Fala</i>. <b>Linux:</b> instale <code>speech-dispatcher</code> e <code>espeak-ng</code>.</li>
     <li>Depois de instalar, feche e abra a página de novo.</li>
   </ol>
-  <p>Velocidade: <span class="rate">${[0.7, 0.85, 1].map(r => `<button type="button" data-act="rate" data-r="${r}" aria-pressed="${Math.abs(audio.rate - r) < .06}">${r === 0.7 ? 'Bem devagar' : r === 0.85 ? 'Devagar' : 'Normal'}</button>`).join('')}</span>
+  <p>${rateBar()}
   <button class="btn ghost sm" type="button" data-say="Dzień dobry! Jak się masz?">Testar: „Dzień dobry! Jak się masz?”</button></p>
   <h4>Microfone</h4>
   <p>Para ouvir você, o app usa o <b>Whisper</b>, que roda no próprio aparelho (baixa cerca de 80 MB na primeira vez). Se ele não carregar, usa o reconhecimento de voz do sistema, quando existe.</p>
@@ -961,6 +972,7 @@ function renderChapter() {
   ${lessonsCard(ch, id)}
   <div class="section-h"><h2>Estudo por etapas</h2></div>
   <nav class="tabs" role="tablist">${STEPS.map((s, i) => `<button type="button" role="tab" data-act="tab" data-tab="${s.id}" aria-selected="${tab === s.id}" class="${stepDone(p, s.id) ? 'ok' : ''}"><span class="n">${stepDone(p, s.id) ? '✓' : i + 1}</span>${s.label}</button>`).join('')}</nav>
+  ${rateBar()}
   <section class="panel" id="panel"></section>
   ${st && (tab === 'redacao' || chDone(id)) ? stopHTML(view.lvl, st, false) : ''}
   <div class="stepdone" style="border:0">
@@ -1012,6 +1024,48 @@ function exampleBlock(ex) {
   if (!ex) return '';
   return `<div class="example"><div class="exl" lang="pl">${markHTML(ex[0])} ${sayBtn(plainEx(ex[0]), 'o exemplo', true)}</div><div class="ext">${esc(ex[1])}</div></div>`;
 }
+/* Mais exemplos: frases escritas à mão (COURSE.more) + frases do próprio curso que usam a palavra */
+let corpus = null;
+function buildCorpus() {
+  corpus = []; const seen = new Set();
+  const add = (pl, pt, lvl) => { pl = plainEx(String(pl || '')).replace(/\s*\(.*?\)/g, '').trim(); if (!pl || !pt || pl.length < 4 || seen.has(pl)) return; seen.add(pl); corpus.push({ pl, pt, lvl, low: ' ' + pl.toLowerCase().replace(/[.,!?;:„”"…()–—-]/g, ' ').replace(/\s+/g, ' ') + ' ' }); };
+  for (const m of COURSE.meta) for (const c of level(m.id)) {
+    const ex = (COURSE.extras[m.id + '-' + c.n] || {}).ex || {}; for (const k in ex) add(ex[k][0], ex[k][1], m.id);
+    for (const l of (c.dialogue && c.dialogue.l) || []) add(l[1], l[2], m.id);
+    for (const f of c.fill || []) add(String(f[0]).replace('___', f[1]), f[2], m.id);
+    for (const o of c.order || []) add(o[0], o[1], m.id);
+  }
+  for (const lv in COURSE.moreEx) for (const k in COURSE.moreEx[lv]) for (const e of COURSE.moreEx[lv][k]) add(e[0], e[1], lv);
+}
+const exCacheLocal = {};
+function moreExamples(lvl, pl, skip, max = 3) {
+  const key = lvl + '|' + pl; if (exCacheLocal[key]) return exCacheLocal[key];
+  if (!corpus) buildCorpus();
+  const out = [], used = new Set([plainEx(skip || '').trim()]);
+  const norm = x => plainEx(x).toLowerCase().replace(/[^\p{L} ]/gu, '').trim(); const selfN = String(pl).split(' / ').map(norm);
+  const push = (a, b) => { const t = plainEx(a).trim(); if (used.has(t) || out.length >= max || selfN.includes(norm(a))) return; used.add(t); out.push([a, b]); };
+  for (const e of ((COURSE.moreEx[lvl] || {})[pl] || [])) push(e[0], e[1]);
+  const forms = String(pl).split(/ \/ | → /).map(f => speakable(f).replace(/[?!.…]/g, '').toLowerCase().trim()).filter(Boolean);
+  const order = ['a1', 'a2', 'b1', 'b2']; const li = order.indexOf(lvl);
+  const ok = e => order.indexOf(e.lvl) <= Math.max(li, 0) + 1;
+  for (const f of forms) {
+    if (out.length >= max) break;
+    const multi = f.includes(' ');
+    const re = multi ? null : f.length <= 3 ? new RegExp(' ' + f + ' ') : new RegExp(' ' + f.slice(0, Math.max(3, f.length - (f.length > 6 ? 2 : 1))) + '\\p{L}{0,4} ', 'u');
+    const hits = corpus.filter(e => ok(e) && (multi ? e.low.includes(' ' + f + ' ') || e.low.includes(' ' + f) : re.test(e.low)));
+    hits.sort((a, b) => Math.abs(order.indexOf(a.lvl) - li) - Math.abs(order.indexOf(b.lvl) - li) || Math.abs(a.pl.length - 38) - Math.abs(b.pl.length - 38));
+    for (const h of hits) push(h.pl, h.pt);
+  }
+  return (exCacheLocal[key] = out);
+}
+function moreExHTML(lvl, pl, skip) {
+  const v = moreExamples(lvl, pl, skip); if (!v.length) return '';
+  return `<div class="moreex"><div class="mxh">Em outros contextos</div>${v.map(x => `<div class="mx"><span lang="pl">${esc(plainEx(x[0]))}</span> ${sayBtn(plainEx(x[0]), 'o exemplo', true)}<br><span class="tr">${esc(x[1])}</span></div>`).join('')}</div>`;
+}
+const RATES = [[0.55, 'Muito devagar'], [0.75, 'Devagar'], [1, 'Médio'], [1.3, 'Rápido']];
+function rateBar() {
+  return `<div class="ratebar"><span>Velocidade da voz</span><span class="rate">${RATES.map(([r, l]) => `<button type="button" data-act="rate" data-r="${r}" aria-pressed="${Math.abs(audio.rate - r) < .08}">${l}</button>`).join('')}</span></div>`;
+}
 function vocabHTML(ch, id) {
   const p = store.get(id), batches = batchesOf(view.lvl, ch), total = allWords(ch).length;
   const vb = Math.min(p.vb || 0, batches.length);
@@ -1023,7 +1077,7 @@ function vocabHTML(ch, id) {
     return `${modes}<div class="bar-actions"><label class="toggle"><input type="checkbox" data-act="hidetr" ${ui.hideTr ? 'checked' : ''}> Esconder tradução</label></div>
     <div class="${ui.hideTr ? 'hide-tr' : ''}">${ch.vocab.map(g => `<div class="vgroup"><h4>${esc(g.g)}</h4>${g.w.map(w => { const ex = exOf(view.lvl, ch.n, w[0]); return `
       <div class="vrow" tabindex="0"><span class="pl">${esc(w[0])}</span><span class="tr">${esc(w[1])}</span>${sayBtn(firstForm(w[0]))}
-      ${w[2] ? `<span class="note">${esc(w[2])}</span>` : ''}${ex ? `<span class="vex"><span lang="pl">${markHTML(ex[0])}</span> ${sayBtn(plainEx(ex[0]), 'o exemplo', true)}<br><span class="tr">${esc(ex[1])}</span></span>` : ''}</div>`; }).join('')}</div>`).join('')}</div>
+      ${w[2] ? `<span class="note">${esc(w[2])}</span>` : ''}${ex ? `<span class="vex"><span lang="pl">${markHTML(ex[0])}</span> ${sayBtn(plainEx(ex[0]), 'o exemplo', true)}<br><span class="tr">${esc(ex[1])}</span></span>` : ''}<span class="vex">${moreExHTML(view.lvl, w[0], ex && ex[0])}</span></div>`; }).join('')}</div>`).join('')}</div>
     ${stepFooter(id, 'vocab', 'A etapa conclui sozinha quando você terminar todos os blocos em "Aprender".')}`;
   }
   const L = ui.learn;
@@ -1111,7 +1165,7 @@ function grammarHTML(ch, id) {
   if (!ui.gc || ui.gc.length !== checks.length) ui.gc = checks.map(() => null);
   const answered = ui.gc.filter(v => v !== null).length, right = ui.gc.filter((v, i) => v === checks[i][2]).length;
   return `<p class="lead">Leia cada quadro e toque nos exemplos sublinhados para ouvir. No fim, faça o teste rápido: ele conclui a etapa.</p>` +
-  ch.grammar.map(g => `<div class="gram"><h4>${esc(g.t)}</h4>${g.h.replace(/<table>/g, '<div class="tblwrap"><table>').replace(/<\/table>/g, '</table></div>')}</div>`).join('') +
+  ch.grammar.map(g => `<div class="gram${g.simple ? ' gsimple' : ''}"><h4>${esc(g.t)}</h4>${g.h.replace(/<table>/g, '<div class="tblwrap"><table>').replace(/<\/table>/g, '</table></div>')}</div>`).join('') +
   (checks.length ? `<div class="checks-block"><h4 class="serif">Teste rápido</h4>
     ${checks.map((c, i) => { const pick = ui.gc[i], ok = pick === c[2]; const sent = /___/.test(c[0]) && !/:/.test(c[0]) ? c[0].replace('___', c[1][c[2]]) : null;
       return `<div class="q"><div class="clz">${esc(c[0]).replace('___', `<span class="blank">${pick !== null ? esc(c[1][pick]) : '____'}</span>`)}</div>
@@ -1246,7 +1300,7 @@ function psRecord(t, res, extra) {
   const ok = res === 'right' || res === 'close';
   S.res[S.i] = ok;
   if (t.w) { const k = wkey(view.lvl, t.w.pl); store.setBox(k, ok ? store.box(k) + 1 : Math.min(store.box(k), 1)); }
-  if (ok && audio.can() && t.k !== 'match') { const ans = t.k === 'fill' ? t.f[0].replace('___', t.f[1]).replace(/\(.*?\)/g, '') : t.k === 'cloze' ? t.a + t.ans + t.b : taskAnswer(t); audio.say(ans); }
+  if (ok && audio.can() && t.k !== 'match') { const ans = t.k === 'mean' ? firstForm(t.w.pl) : t.k === 'fill' ? t.f[0].replace('___', t.f[1]).replace(/\(.*?\)/g, '') : t.k === 'cloze' ? t.a + t.ans + t.b : taskAnswer(t); audio.say(ans); }
 }
 function psFinish(ch, id) {
   const S = ui.ps, pct = Math.round(S.res.filter(Boolean).length / S.res.length * 100), p = store.get(id);
@@ -1542,8 +1596,10 @@ function bankExHTML(k) {
 async function bankExamples(pl, pt, lvl, btn) {
   const k = wkey(lvl, pl);
   if (exCache[k]) { ui.bex[k] = exCache[k]; render(); return; }
+  const loc = moreExamples(lvl, pl, null, 4);
+  if (loc.length) { ui.bex[k] = loc.map(x => ({ pl: plainEx(x[0]), pt: x[1] })); render(); return; }
   const sample = await getSample();
-  if (!sample) { ui.bex[k] = 'A IA não está disponível nesta tela para criar exemplos.'; render(); return; }
+  if (!sample) { ui.bex[k] = 'Ainda não há outros exemplos desta palavra no curso.'; render(); return; }
   ui.bex[k] = 'loading'; render();
   const prompt = `Crie 2 frases de exemplo curtas e naturais em polonês usando "${pl}" (significado: ${pt}), adequadas ao nível ${lvl.toUpperCase()} do QECR, para um aluno brasileiro. Use a palavra numa forma correta no contexto (pode flexionar). Responda SOMENTE com JSON: [{"pl": "frase em polonês", "pt": "tradução para o português do Brasil"}, {"pl": "...", "pt": "..."}]`;
   try {
@@ -1604,7 +1660,7 @@ document.addEventListener('click', async e => {
     case 'gsconnect': { const v = (document.getElementById('ghtoken') || {}).value || ''; if (v.trim().length < 20) { toast('Cole o token do GitHub.'); break; } await gsync.connect(v); render(); break; }
     case 'gssync': gsync.sync(); break;
     case 'gsoff': gsync.off(); render(); break;
-    case 'rate': audio.rate = +b.dataset.r; try { localStorage.setItem('polski-rate', audio.rate); } catch (err) {} render(); audio.say('Dzień dobry!'); break;
+    case 'rate': audio.rate = +b.dataset.r; try { localStorage.setItem('polski-rate', audio.rate); } catch (err) {} document.querySelectorAll('[data-act="rate"]').forEach(x => x.setAttribute('aria-pressed', String(Math.abs(audio.rate - +x.dataset.r) < .08))); audio.say('Dzień dobry! Jak się masz?'); break;
     case 'tab': go(`${view.lvl}-${view.n}-${b.dataset.tab}`); document.querySelector('.tabs')?.scrollIntoView({ block: 'start' }); break;
     case 'mark': store.mark(id, b.dataset.step); toast('Etapa concluída'); render(); break;
     case 'stopread': store.data.stops[b.dataset.k] = 1; store.log(); store.save(); toast('Parada marcada como lida'); render(); break;
@@ -1947,7 +2003,7 @@ function runnerHTML(R) {
   const choice = (opts, ans, pl) => `<div class="opts one">${opts.map((o, j) => `<button type="button" data-act="lspick" data-o="${j}" ${st ? 'disabled' : ''} ${pl ? 'lang="pl"' : ''} class="${st && o === ans ? 'right' : ''} ${st && st.pick === o && o !== ans ? 'wrong' : ''}">${esc(o)}</button>`).join('')}</div>`;
   let body = '', cont = false;
   if (t.k === 'intro') { cont = true; body = `<div class="lsword" lang="pl">${esc(t.w.pl)}</div><div class="bar-actions" style="justify-content:center">${sayBtn(firstForm(t.w.pl), 'a palavra')}<button class="btn ghost sm" type="button" data-act="slow" data-t="${esc(firstForm(t.w.pl))}">devagar</button></div>
-      <div class="lstr">${esc(t.w.pt)}</div>${t.w.note ? `<div class="meta">${esc(t.w.note)}</div>` : ''}${exampleBlock(t.w.ex)}
+      <div class="lstr">${esc(t.w.pt)}</div>${t.w.note ? `<div class="meta">${esc(t.w.note)}</div>` : ''}${exampleBlock(t.w.ex)}${moreExHTML(view.lvl, t.w.pl, t.w.ex && t.w.ex[0])}
       <div class="bar-actions" style="justify-content:center;margin-top:12px">${micBtn('say:' + firstForm(t.w.pl), 'Repetir em voz alta') || '<p class="meta">Ouça e repita em voz alta.</p>'}</div><div id="micres"></div>`; }
   else if (t.k === 'tip') { cont = true; body = `<div class="gram lstip"><h4>${esc(t.g.t)}</h4>${t.g.h.replace(/<table>/g, '<div class="tblwrap"><table>').replace(/<\/table>/g, '</table></div>')}</div>`; }
   else if (t.k === 'mean') body = `<div class="lsword sm" lang="pl">${esc(t.w.pl)} ${sayBtn(firstForm(t.w.pl), '', true)}</div>${choice(t.opts, t.ans)}`;
@@ -1971,7 +2027,7 @@ function runnerHTML(R) {
 function lsAnswer(t) { return t.k === 'gcheck' ? t.c[1][t.c[2]] : t.k === 'type' ? t.ans[0] : t.k === 'order' ? t.text : t.ans; }
 function lsFeedback(t, st) {
   const ok = st.res !== 'wrong', ans = lsAnswer(t);
-  const full = t.k === 'cloze' ? t.a + t.ans + t.b : t.k === 'gcheck' && /___/.test(t.c[0]) && !/:/.test(t.c[0]) ? t.c[0].replace('___', ans).replace(/\(.*?\)/g, '') : t.k === 'match' ? '' : ans;
+  const full = t.k === 'mean' ? firstForm(t.w.pl) : t.k === 'cloze' ? t.a + t.ans + t.b : t.k === 'gcheck' && /___/.test(t.c[0]) && !/:/.test(t.c[0]) ? t.c[0].replace('___', ans).replace(/\(.*?\)/g, '') : t.k === 'match' ? '' : ans;
   const msg = t.k === 'match' ? (st.miss ? `Feito, com ${st.miss} erro(s).` : 'Perfeito!') : st.res === 'right' ? 'Certo!' : st.res === 'close' ? `Quase: confira os acentos. <b>${esc(ans)}</b>` : `Resposta: <b>${esc(ans)}</b>`;
   const expl = t.k === 'gcheck' ? `<div class="meta">${esc(t.c[3])}</div>` : '';
   const ex = !ok && t.w && t.w.ex && t.k !== 'cloze' ? `<div class="example small"><div class="exl" lang="pl">${markHTML(t.w.ex[0])}</div><div class="ext">${esc(t.w.ex[1])}</div></div>` : '';
@@ -2002,7 +2058,7 @@ function lsRecord(R, t, res, extra) {
     else { store.setBox(k, ok ? store.box(k) + 1 : Math.min(store.box(k), 1)); srsSeed(k); }
   }
   if (!ok && t.k !== 'match' && !t.requeued) { const c = Object.assign({}, t, { requeued: true }); if (c.k === 'order') { c.pool = shuffle(t.text.split(' ')).map((x, i) => ({ t: x, i })); c.built = []; } if (c.opts) c.opts = shuffle(c.opts); R.items.push(c); R.again.add(R.items.length - 1); R.seen.add(c); }
-  if (ok && audio.can() && t.k !== 'match') { const ans = lsAnswer(t); audio.say(t.k === 'cloze' ? t.a + t.ans + t.b : ans); }
+  if (ok && audio.can() && t.k !== 'match') { const ans = lsAnswer(t); audio.say(t.k === 'mean' ? firstForm(t.w.pl) : t.k === 'cloze' ? t.a + t.ans + t.b : ans); }
   store.log(); store.save();
 }
 function lsFinish(R) {
@@ -2087,6 +2143,7 @@ route();
 audio.init();
 setSync('Progresso salvo neste navegador.');
 gsync.init();
+window.__more = moreExamples;
 })();
 </script>
 </body>
