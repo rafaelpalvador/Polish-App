@@ -1238,6 +1238,7 @@ function makeSession(ch) {
   T.push({ k: 'match', words: pick(5) });
   makeCloze(pick(3), ws).forEach(q => T.push(Object.assign({ k: 'cloze' }, q)));
   pick(2).forEach(w => T.push({ k: 'type', w, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) }));
+  if (voice.available()) { pick(2).forEach(w => T.push(falaItem(w))); const sw = shuffle(ws.filter(x => x.ex && plainEx(x.ex[0]).split(' ').length <= 7))[0]; if (sw) T.push(falaItem(sw, sw.ex)); }
   shuffle(ch.fill).slice(0, 2).forEach(f => T.push({ k: 'fill', f }));
   T.push({ k: 'order', o: shuffle(ch.order)[0] });
   if (can) { const w = shuffle(ws.filter(x => x.ex && plainEx(x.ex[0]).split(' ').length <= 7))[0]; if (w) T.push({ k: 'dict', w, text: plainEx(w.ex[0]) }); }
@@ -1246,7 +1247,7 @@ function makeSession(ch) {
   tasks.forEach(t => { if (t.k === 'order') { const toks = t.o[0].split(' '); let s = shuffle(toks); for (let i = 0; i < 5 && s.join(' ') === t.o[0]; i++) s = shuffle(toks); t.pool = s.map((x, i) => ({ t: x, i })); t.built = []; } if (t.k === 'match') t.m = makeMatch(t.words); });
   return { tasks, i: 0, res: [], state: null };
 }
-const TASK_LABEL = { mean: 'O que significa?', listen: 'Ouça e escolha a palavra', say: 'Como se diz em polonês?', match: 'Ligue os pares', cloze: 'Complete o exemplo', type: 'Escreva em polonês', fill: 'Complete a frase', order: 'Monte a frase', dict: 'Ditado: ouça e escreva' };
+const TASK_LABEL = { mean: 'O que significa?', listen: 'Ouça e escolha a palavra', say: 'Como se diz em polonês?', match: 'Ligue os pares', cloze: 'Complete o exemplo', type: 'Escreva em polonês', fill: 'Complete a frase', order: 'Monte a frase', dict: 'Ditado: ouça e escreva', fala: 'Fale em polonês' };
 function practiceHTML(ch, id) {
   const p = store.get(id);
   if (!ui.ps) {
@@ -1270,6 +1271,7 @@ function practiceHTML(ch, id) {
   else if (t.k === 'listen') body = `<div class="bar-actions"><button class="btn sm" type="button" data-say="${esc(t.ans)}">▶ Ouvir de novo</button></div>${choice(t.opts, t.ans, true)}`;
   else if (t.k === 'cloze') body = `<div class="clz" lang="pl">${esc(t.a)}<span class="blank">${st ? esc(st.pick) : '____'}</span>${esc(t.b)}</div><div class="hint">${esc(t.pt)}</div>${choice(t.opts, t.ans, true)}`;
   else if (t.k === 'match') body = matchHTML(t.m, 'psmatch');
+  else if (t.k === 'fala') body = falaBody(t, st, 'ps');
   else if (t.k === 'type') body = `<div class="term">${esc(t.w.pt)}</div>${t.w.ex ? `<div class="hint">Exemplo: ${esc(t.w.ex[1])}</div>` : ''}${inputHTML(st)}`;
   else if (t.k === 'fill') { const [a, b] = t.f[0].split('___'); body = `<div class="clz" lang="pl">${esc(a)}<span class="blank">${st ? esc(st.v || '—') : '____'}</span>${esc(b)}</div><div class="hint">${esc(t.f[2])}</div>${inputHTML(st)}`; }
   else if (t.k === 'dict') body = `<div class="bar-actions"><button class="btn sm" type="button" data-say="${esc(t.text)}">▶ Ouvir a frase</button><button class="btn ghost sm" type="button" data-act="slow" data-t="${esc(t.text)}">▶ Bem devagar</button></div>${inputHTML(st, true)}`;
@@ -1283,13 +1285,15 @@ function inputHTML(st, wide) {
   return `${keysHTML()}<div class="bar-actions"><input class="pinput ${st ? st.res : ''} ${wide ? 'wide' : ''}" id="pinput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" lang="pl" value="${st ? esc(st.v) : ''}" ${st ? 'disabled' : ''} aria-label="Sua resposta">${st ? '' : micBtn('pinput') + '<button class="btn sm" type="button" data-act="pscheck">Verificar</button>'}</div>`;
 }
 function taskAnswer(t) {
-  return t.k === 'type' ? t.ans[0] : t.k === 'fill' ? t.f[1] : t.k === 'dict' ? t.text : t.k === 'order' ? t.o[0] : t.ans;
+  return t.k === 'type' || t.k === 'fala' ? t.ans[0] : t.k === 'fill' ? t.f[1] : t.k === 'dict' ? t.text : t.k === 'order' ? t.o[0] : t.ans;
 }
 function feedbackHTML(t, st) {
   const ok = st.res === 'right' || st.res === 'close';
   const ans = taskAnswer(t);
   const ex = t.w && t.w.ex ? t.w.ex : null;
   const full = t.k === 'fill' ? (t.f[0].replace('___', t.f[1])).replace(/\(.*?\)/g, '') : t.k === 'cloze' ? t.a + t.ans + t.b : null;
+  if (t.k === 'fala') return `<div class="fb ${st.res}">${st.res === 'right' ? 'Certo! Pronúncia entendida.' : st.res === 'close' ? 'Quase! Deu para entender, mas ouça e repita: <b>' + esc(ans) + '</b>.' : 'Não foi dessa vez. O certo é <b>' + esc(ans) + '</b>.'} ${sayBtn(ans, 'a resposta', true)}</div>
+    <div class="bar-actions" style="margin-top:10px"><button class="btn sm" type="button" data-act="psnext" id="psnext">Continuar →</button></div>`;
   return `<div class="fb ${st.res}">${st.res === 'right' ? 'Certo!' : st.res === 'close' ? 'Quase: confira os acentos. A forma certa é <b>' + esc(ans) + '</b>.' : t.k === 'match' ? 'Feito, com ' + st.miss + ' erro(s).' : 'A resposta é <b>' + esc(ans) + '</b>.'}
     ${full ? sayBtn(full, 'a frase', true) : t.k === 'match' ? '' : sayBtn(ans, 'a resposta', true)}</div>
     ${ex && t.k !== 'cloze' && t.k !== 'dict' ? `<div class="example small"><div class="exl" lang="pl">${markHTML(ex[0])} ${sayBtn(plainEx(ex[0]), 'o exemplo', true)}</div><div class="ext">${esc(ex[1])}</div></div>` : ''}
@@ -1748,6 +1752,7 @@ document.addEventListener('click', async e => {
       const answers = t.k === 'type' ? t.ans : t.k === 'fill' ? [t.f[1]] : [t.text];
       psRecord(t, judge(v, answers), { v }); render(); break;
     }
+    case 'psfskip': { const S = ui.ps; if (S.state) break; S.tasks.splice(S.i, 1); if (S.res) S.res.splice(S.i, 1); if (S.i >= S.tasks.length) psFinish(ch, id); render(); break; }
     case 'psnext': {
       const S = ui.ps; S.i++; S.state = null;
       if (S.i >= S.tasks.length) psFinish(ch, id);
@@ -1887,6 +1892,26 @@ function micBox(html, ms) {
 function micState(s) { document.querySelectorAll('.mic').forEach(b => { b.classList.toggle('rec', s === 'rec'); b.classList.toggle('busy', s === 'busy'); }); if (!s && voice.rec === null && !voice.busy) { const el = document.getElementById('micbox'); if (el && /Ouvindo/.test(el.textContent)) micBox(''); } }
 const MIC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>';
 const micBtn = (target, label) => voice.available() ? `<button class="mic" type="button" data-act="mic" data-target="${esc(target)}" aria-label="${esc(label || 'Falar')}">${MIC}${label ? `<span>${esc(label)}</span>` : ''}</button>` : '';
+/* Tarefa de fala: mostra o português, a pessoa fala em polonês e o app corrige */
+const falaItem = (w, sentence) => sentence ? { k: 'fala', w, sent: true, pt: sentence[1], ans: [plainEx(sentence[0]).replace(/[?!.]$/, '')] } : { k: 'fala', w, pt: w.pt, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) };
+function falaBody(t, st, ctx) {
+  const mic = micBtn('fala:' + ctx, 'Falar em polonês');
+  return `<div class="${ctx === 'ls' ? 'lsword sm' : 'term'}">${esc(t.pt)}</div>
+    <p class="meta">${t.sent ? 'Diga a frase inteira em polonês.' : 'Diga a palavra em polonês.'} Toque no microfone, fale e espere a correção.</p>
+    ${st ? `<div class="micres ${st.res === 'right' ? 'ok' : st.res === 'close' ? 'close' : 'bad'}"><span>Ouvi: „${esc(st.v || '')}”</span></div>` : `<div class="bar-actions" style="justify-content:center">${mic || '<p class="meta">O microfone não está disponível nesta tela.</p>'}<button class="btn ghost sm" type="button" data-act="${ctx}fskip">Não posso falar agora</button></div>`}`;
+}
+/* Aceita sinônimos: outras palavras do curso com a mesma tradução ("oi" = hej ou cześć) */
+function falaAnswers(t) {
+  if (t.sent) return t.ans;
+  const segs = x => String(x || '').toLowerCase().split(/\s*[\/,;]\s*/).map(z => z.replace(/\(.*?\)/g, '').trim()).filter(Boolean);
+  const mine = new Set(segs(t.pt)), out = [...t.ans];
+  for (const w of wordIndex().values()) if (segs(w.pt).some(z => mine.has(z))) out.push(...w.pl.split(' / ').map(z => speakable(z).replace(/[?!.]$/, '')));
+  return [...new Set(out)];
+}
+function judgeSpeech(heard, alts, answers) {
+  const score = Math.max(...[heard, ...(alts || [])].flatMap(h => answers.map(a => similarity(h, a))));
+  return score >= 0.85 ? 'right' : score >= 0.65 ? 'close' : 'wrong';
+}
 /* Parecido: 0 a 1, ignorando acentos e pontuação */
 function similarity(a, b) {
   a = strip(norm(a)); b = strip(norm(b)); if (!a || !b) return 0; if (a === b) return 1;
@@ -1903,6 +1928,12 @@ function voiceResult(target, text, alts) {
     const el = document.getElementById(target); if (!el || el.disabled) return;
     el.value = clean; el.dispatchEvent(new Event('input', { bubbles: true })); el.focus();
     micBox(`Ouvi: „${esc(clean)}”. Confira e toque em Verificar.`, 3000); return;
+  }
+  if (target.startsWith('fala:')) {
+    const ctx = target.slice(5);
+    if (ctx === 'ls') { const R = ui.ls, t = R && R.items[R.i]; if (t && t.k === 'fala' && !R.st) { lsRecord(R, t, judgeSpeech(clean, alts, falaAnswers(t)), { v: clean }); render(); document.querySelector('.lsfoot')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } }
+    else { const S = ui.ps, t = S && S.tasks[S.i]; if (t && t.k === 'fala' && !S.state) { psRecord(t, judgeSpeech(clean, alts, falaAnswers(t)), { v: clean }); render(); } }
+    return;
   }
   /* Repetir em voz alta: compara com a frase alvo */
   const want = target.replace(/^say:/, '');
@@ -1976,7 +2007,11 @@ function buildLesson(lvl, ch, b) {
     const opts = shuffle([line[1], ...shuffle(L.filter(x => x[1] !== line[1] && x[1] !== prev[1]).map(x => x[1])).slice(0, 2)]);
     T.push({ k: 'dlg', prev, line, opts, ans: line[1], title: ch.dialogue.t });
   }
-  shuffle(words).slice(0, 2).forEach(w => T.push({ k: 'type', w, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) }));
+  const tw = shuffle(words); tw.slice(0, 2).forEach(w => T.push({ k: 'type', w, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) }));
+  if (voice.available()) {
+    (tw.length > 3 ? tw.slice(2, 4) : tw.slice(0, 2)).forEach(w => T.push(falaItem(w)));
+    const sw = shuffle(words.filter(w => w.ex && plainEx(w.ex[0]).split(' ').length <= 7))[0]; if (sw) T.push(falaItem(sw, sw.ex));
+  }
   return { mode: 'les', lvl, n: ch.n, b, items: T, i: 0, st: null, right: 0, graded: 0, again: new Set(), seen: new Set() };
 }
 function buildReview() {
@@ -1986,12 +2021,13 @@ function buildReview() {
     const pool = [...levelVocab(w.lvl).values()];
     let kind = e.b <= 2 ? 'mean' : e.b <= 4 ? (audio.can() && e.b === 3 ? 'listen' : 'say') : 'type';
     if (kind === 'type' && w.ex && clozeOf(w.ex[0]) && w.c && Math.random() < .5) { const q = makeCloze([w], chWords(w.lvl, findCh(w.lvl, w.c)))[0]; if (q && q.opts.length > 1) { T.push(Object.assign({ k: 'cloze', key: k }, q)); continue; } }
-    if (kind === 'type') T.push({ k: 'type', w, key: k, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) });
+    if (kind === 'type' && voice.available() && Math.random() < .5) T.push(Object.assign(falaItem(w), { key: k }));
+    else if (kind === 'type') T.push({ k: 'type', w, key: k, ans: w.pl.split(' / ').map(s => speakable(s).replace(/[?!.]$/, '')) });
     else T.push(Object.assign(choiceItem(kind, w, pool), { key: k }));
   }
   return { mode: 'rev', items: shuffle(T), i: 0, st: null, right: 0, graded: 0, again: new Set(), seen: new Set(), total: T.length };
 }
-const LS_LABEL = { intro: 'Palavra nova', tip: 'Dica de gramática', mean: 'O que significa?', say: 'Como se diz em polonês?', listen: 'Ouça e escolha', match: 'Ligue os pares', cloze: 'Complete a frase', order: 'Monte a frase', gcheck: 'Escolha a forma certa', dlg: 'Continue o diálogo', type: 'Escreva em polonês' };
+const LS_LABEL = { intro: 'Palavra nova', tip: 'Dica de gramática', mean: 'O que significa?', say: 'Como se diz em polonês?', listen: 'Ouça e escolha', match: 'Ligue os pares', cloze: 'Complete a frase', order: 'Monte a frase', gcheck: 'Escolha a forma certa', dlg: 'Continue o diálogo', type: 'Escreva em polonês', fala: 'Fale em polonês' };
 const lsKey = (R, t) => t.key || (t.w ? wkey(R.lvl || t.w.lvl, t.w.pl) : null);
 
 function runnerHTML(R) {
@@ -2018,17 +2054,18 @@ function runnerHTML(R) {
       <div class="tokens built">${t.built.map((x, j) => `<button type="button" data-act="lsunpick" data-j="${j}" ${st ? 'disabled' : ''} lang="pl">${esc(x.t)}</button>`).join('')}</div>
       <div class="tokens">${t.pool.map((x, j) => `<button type="button" data-act="lstok" data-j="${j}" ${st ? 'disabled' : ''} lang="pl">${esc(x.t)}</button>`).join('')}</div>
       ${!t.pool.length && !st ? `<button class="btn sm" type="button" data-act="lscheck">Verificar</button>` : ''}`;
+  else if (t.k === 'fala') body = falaBody(t, st, 'ls');
   else if (t.k === 'type') body = `<div class="lsword sm">${esc(t.w.pt)}</div>${t.w.ex ? `<div class="hint">Exemplo: ${esc(t.w.ex[1])}</div>` : ''}${keysHTML()}
       <div class="bar-actions"><input class="pinput ${st ? st.res : ''}" id="linput" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" lang="pl" value="${st ? esc(st.v) : ''}" ${st ? 'disabled' : ''} aria-label="Sua resposta">${st ? '' : micBtn('linput') + '<button class="btn sm" type="button" data-act="lscheck">Verificar</button>'}</div>`;
   const again = R.again.has(R.i) ? '<span class="lsagain">de novo</span>' : '';
   return `${bar}<div class="lscard"><div class="prompt">${LS_LABEL[t.k]} ${again}</div>${body}</div>
     ${cont ? `<div class="lsfoot"><button class="btn accent" type="button" data-act="lsnext" id="lsnext">Continuar →</button></div>` : st ? lsFeedback(t, st) : ''}`;
 }
-function lsAnswer(t) { return t.k === 'gcheck' ? t.c[1][t.c[2]] : t.k === 'type' ? t.ans[0] : t.k === 'order' ? t.text : t.ans; }
+function lsAnswer(t) { return t.k === 'gcheck' ? t.c[1][t.c[2]] : t.k === 'type' || t.k === 'fala' ? t.ans[0] : t.k === 'order' ? t.text : t.ans; }
 function lsFeedback(t, st) {
   const ok = st.res !== 'wrong', ans = lsAnswer(t);
   const full = t.k === 'mean' ? firstForm(t.w.pl) : t.k === 'cloze' ? t.a + t.ans + t.b : t.k === 'gcheck' && /___/.test(t.c[0]) && !/:/.test(t.c[0]) ? t.c[0].replace('___', ans).replace(/\(.*?\)/g, '') : t.k === 'match' ? '' : ans;
-  const msg = t.k === 'match' ? (st.miss ? `Feito, com ${st.miss} erro(s).` : 'Perfeito!') : st.res === 'right' ? 'Certo!' : st.res === 'close' ? `Quase: confira os acentos. <b>${esc(ans)}</b>` : `Resposta: <b>${esc(ans)}</b>`;
+  const msg = t.k === 'fala' ? (st.res === 'right' ? 'Certo! Pronúncia entendida.' : st.res === 'close' ? `Quase! Ouça e repita: <b>${esc(ans)}</b>` : `Não foi dessa vez. O certo é <b>${esc(ans)}</b>`) : t.k === 'match' ? (st.miss ? `Feito, com ${st.miss} erro(s).` : 'Perfeito!') : st.res === 'right' ? 'Certo!' : st.res === 'close' ? `Quase: confira os acentos. <b>${esc(ans)}</b>` : `Resposta: <b>${esc(ans)}</b>`;
   const expl = t.k === 'gcheck' ? `<div class="meta">${esc(t.c[3])}</div>` : '';
   const ex = !ok && t.w && t.w.ex && t.k !== 'cloze' ? `<div class="example small"><div class="exl" lang="pl">${markHTML(t.w.ex[0])}</div><div class="ext">${esc(t.w.ex[1])}</div></div>` : '';
   return `<div class="lsfoot ${ok ? 'ok' : 'bad'}"><div class="lsmsg">${msg} ${full ? sayBtn(full, 'a resposta', true) : ''}${expl}${ex}${!ok && t.k !== 'match' ? '<div class="meta">Esta volta no fim.</div>' : ''}</div>
@@ -2126,6 +2163,7 @@ document.addEventListener('click', e => {
     if (t.k === 'order') lsRecord(R, t, norm(t.built.map(x => x.t).join(' ')) === norm(t.text) ? 'right' : 'wrong');
     else { const v = (document.getElementById('linput') || {}).value || ''; if (!v.trim()) { toast('Escreva sua resposta.'); return; } lsRecord(R, t, judge(v, t.ans), { v }); }
   }
+  else if (a === 'lsfskip' && !R.st) { R.items.splice(R.i, 1); if (R.i >= R.items.length) lsFinish(R); }
   else if (a === 'lsnext') { R.i++; R.st = null; if (R.i >= R.items.length) lsFinish(R); }
   else return;
   lsRerender();
@@ -2143,7 +2181,7 @@ route();
 audio.init();
 setSync('Progresso salvo neste navegador.');
 gsync.init();
-window.__more = moreExamples;
+window.__more = moreExamples; window.__vr = voiceResult;
 })();
 </script>
 </body>
